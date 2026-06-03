@@ -58,8 +58,8 @@ func runStatus(_ *cobra.Command, _ []string) error {
 		if len(c.Categories) > 0 {
 			flags = append(flags, "cat:"+strings.Join(c.Categories, ","))
 		}
-		if c.Summary != "" {
-			flags = append(flags, "summary")
+		if c.ReleaseNote != "" {
+			flags = append(flags, "release_note")
 		}
 		if len(c.Notices) > 0 {
 			flags = append(flags, fmt.Sprintf("%d notices", len(c.Notices)))

@@ -30,7 +30,7 @@ type ChangeEntry struct {
 	Categories []string     `json:"categories"`
 	Title      MDText       `json:"title"`
 	Body       *MDText      `json:"body,omitempty"`
-	Summary    *MDText      `json:"summary,omitempty"`
+	ReleaseNote *MDText      `json:"release_note,omitempty"`
 	PR         *int         `json:"pr,omitempty"`
 	Notices    []NoticeEntry `json:"notices"`
 }
@@ -90,7 +90,7 @@ func BuildData(p BuildParams) *ReleaseData {
 			Categories: c.Categories,
 			Title:      MDText{Format: "markdown", Text: c.Title},
 			Body:       mdText(c.Body),
-			Summary:    mdText(c.Summary),
+			ReleaseNote: mdText(c.ReleaseNote),
 			Notices:    make([]NoticeEntry, len(c.Notices)),
 		}
 		for i, n := range c.Notices {

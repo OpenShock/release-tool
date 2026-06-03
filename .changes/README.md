@@ -15,8 +15,8 @@ Title of the change (first line, required)
 
 Optional longer description in Markdown.
 
-## Summary
-Optional short summary included in release.json but not the changelog.
+## Release Note
+Optional consumer-facing note included in release.json but not the changelog.
 
 ## Notices
 - warning: something users must know before upgrading

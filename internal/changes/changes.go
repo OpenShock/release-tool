@@ -25,7 +25,7 @@ type Change struct {
 	Bump       string
 	Title      string
 	Body       string
-	Summary    string
+	ReleaseNote string
 	Notices    []Notice
 	Filename   string
 	Breaking   bool
@@ -45,11 +45,11 @@ type rawFrontmatter struct {
 }
 
 var knownSections = map[string]bool{
-	"## Summary": true,
+	"## Release Note": true,
 	"## Notices": true,
 }
 
-func splitSections(body string) (changelog, summary, notices string) {
+func splitSections(body string) (changelog, releaseNote, notices string) {
 	sections := map[string][]string{"_changelog": {}}
 	current := "_changelog"
 	for _, line := range strings.Split(body, "\n") {
@@ -61,7 +61,7 @@ func splitSections(body string) (changelog, summary, notices string) {
 		sections[current] = append(sections[current], line)
 	}
 	join := func(k string) string { return strings.TrimSpace(strings.Join(sections[k], "\n")) }
-	return join("_changelog"), join("summary"), join("notices")
+	return join("_changelog"), join("release note"), join("notices")
 }
 
 func parseNotices(raw string) []Notice {
@@ -112,7 +112,7 @@ func parseFile(path string) (*Change, error) {
 		breaking = *fm.Breaking
 	}
 
-	changelogRaw, summary, noticesRaw := splitSections(strings.TrimSpace(string(m[2])))
+	changelogRaw, releaseNote, noticesRaw := splitSections(strings.TrimSpace(string(m[2])))
 	if changelogRaw == "" {
 		return nil, fmt.Errorf("%s: missing title line", filename)
 	}
@@ -132,7 +132,7 @@ func parseFile(path string) (*Change, error) {
 		Bump:       fm.Type,
 		Title:      title,
 		Body:       strings.TrimSpace(body),
-		Summary:    summary,
+		ReleaseNote: releaseNote,
 		Notices:    parseNotices(noticesRaw),
 		Filename:   filename,
 		Breaking:   breaking,

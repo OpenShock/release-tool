@@ -11,7 +11,7 @@ func makeChange(bump, title string, breaking bool, categories []string) *changes
 		Bump:       bump,
 		Title:      title,
 		Body:       "body text",
-		Summary:    "summary text",
+		ReleaseNote: "release note text",
 		Breaking:   breaking,
 		Categories: categories,
 		Filename:   title + ".md",
@@ -90,8 +90,8 @@ func TestBuildData_Changes(t *testing.T) {
 	if e.Body == nil || e.Body.Text != "body text" {
 		t.Errorf("Body: got %v", e.Body)
 	}
-	if e.Summary == nil || e.Summary.Text != "summary text" {
-		t.Errorf("Summary: got %v", e.Summary)
+	if e.ReleaseNote == nil || e.ReleaseNote.Text != "release note text" {
+		t.Errorf("ReleaseNote: got %v", e.ReleaseNote)
 	}
 	if len(e.Notices) != 1 || e.Notices[0].Level != "warning" {
 		t.Errorf("Notices: got %v", e.Notices)

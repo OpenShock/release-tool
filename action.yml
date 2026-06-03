@@ -1,5 +1,8 @@
 name: OpenShock Release Tool
 description: Reads .changes/ files, bumps semver, writes release.json, tags the commit.
+branding:
+  icon: package
+  color: blue
 
 inputs:
   mode:

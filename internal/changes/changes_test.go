@@ -40,8 +40,8 @@ Add new endpoint
 
 Extended description here.
 
-## Summary
-Short summary for release notes.
+## Release Note
+Short release note for consumers.
 
 ## Notices
 - warning: requires firmware update
@@ -64,8 +64,8 @@ Short summary for release notes.
 	if c.Body != "Extended description here." {
 		t.Errorf("Body: got %q", c.Body)
 	}
-	if c.Summary != "Short summary for release notes." {
-		t.Errorf("Summary: got %q", c.Summary)
+	if c.ReleaseNote != "Short release note for consumers." {
+		t.Errorf("ReleaseNote: got %q", c.ReleaseNote)
 	}
 	if len(c.Notices) != 1 || c.Notices[0].Level != "warning" || c.Notices[0].Message != "requires firmware update" {
 		t.Errorf("Notices: got %+v", c.Notices)
