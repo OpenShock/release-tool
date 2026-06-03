@@ -38,12 +38,14 @@ func LatestStableTag(root string) (string, error) {
 	return "", nil
 }
 
-func LatestRCNumber(root, base string) (int, error) {
+// LatestPrereleaseNumber returns the highest N seen in tags of the form
+// base-label.N or base-label.N+<anything> (semver build metadata).
+func LatestPrereleaseNumber(root, base, label string) (int, error) {
 	tags, err := run(root, "tag", "--sort=-v:refname")
 	if err != nil {
 		return 0, err
 	}
-	pattern := regexp.MustCompile(`^` + regexp.QuoteMeta(base) + `-rc\.(\d+)$`)
+	pattern := regexp.MustCompile(`^` + regexp.QuoteMeta(base) + `-` + regexp.QuoteMeta(label) + `\.(\d+)(?:\+[0-9a-zA-Z.-]+)?$`)
 	best := 0
 	for _, tag := range strings.Split(tags, "\n") {
 		if m := pattern.FindStringSubmatch(strings.TrimSpace(tag)); m != nil {
@@ -55,12 +57,20 @@ func LatestRCNumber(root, base string) (int, error) {
 	return best, nil
 }
 
+func ShortSHA(root string) (string, error) {
+	return run(root, "rev-parse", "--short", "HEAD")
+}
+
+func CurrentBranch(root string) (string, error) {
+	return run(root, "rev-parse", "--abbrev-ref", "HEAD")
+}
+
 func CurrentCommit(root string) (string, error) {
 	return run(root, "rev-parse", "HEAD")
 }
 
 func CreateTag(root, tag string) error {
-	_, err := run(root, "tag", tag)
+	_, err := run(root, "tag", "-a", "-m", tag, tag)
 	return err
 }
 
