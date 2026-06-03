@@ -3,7 +3,7 @@ description: Reads .changes/ files, bumps semver, writes release.json, tags the 
 
 inputs:
   mode:
-    description: Release mode — 'rc' or 'stable'
+    description: Release mode - 'rc' or 'stable'
     required: true
     options:
       - rc
@@ -16,10 +16,18 @@ inputs:
     description: Path to write release.json (relative to the consuming repo root)
     required: false
     default: release.json
-  github-repo:
-    description: GitHub repo slug (Owner/Repo) used for the CHANGELOG full-diff link. Defaults to the current repo.
+  notes-output:
+    description: Path to write markdown release notes (relative to the consuming repo root)
     required: false
-    default: ${{ github.repository }}
+    default: ''
+  prerelease-label:
+    description: Override the prerelease label (e.g. rc, alpha, beta). Falls back to .changes/config.json.
+    required: false
+    default: ''
+  git-sha:
+    description: Append the short git SHA as build metadata to prerelease tags (e.g. 1.2.3-rc.1+gabc1234).
+    required: false
+    default: 'false'
   go-version:
     description: Go version to use
     required: false
@@ -57,12 +65,23 @@ runs:
         DRY_RUN: ${{ inputs.dry-run }}
         RELEASE_MODE: ${{ inputs.mode }}
         RELEASE_OUTPUT: ${{ inputs.output }}
+        RELEASE_NOTES: ${{ inputs.notes-output }}
+        PRERELEASE_LABEL: ${{ inputs.prerelease-label }}
+        GIT_SHA: ${{ inputs.git-sha }}
       run: |
         ARGS=(
-          --root        "${{ github.workspace }}"
-          --output      "${{ github.workspace }}/$RELEASE_OUTPUT"
-          --github-repo "${{ inputs.github-repo }}"
+          --root   "${{ github.workspace }}"
+          --output "${{ github.workspace }}/$RELEASE_OUTPUT"
         )
+        if [ -n "$RELEASE_NOTES" ]; then
+          ARGS+=(--notes "${{ github.workspace }}/$RELEASE_NOTES")
+        fi
+        if [ -n "$PRERELEASE_LABEL" ]; then
+          ARGS+=(--prerelease-label "$PRERELEASE_LABEL")
+        fi
+        if [ "$GIT_SHA" = "true" ]; then
+          ARGS+=(--git-sha)
+        fi
         if [ "$DRY_RUN" = "true" ]; then
           ARGS+=(--dry-run)
         fi

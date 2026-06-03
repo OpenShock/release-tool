@@ -11,18 +11,26 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var gitSHA bool
+
 var rcCmd = &cobra.Command{
 	Use:   "rc",
-	Short: "Create or bump an RC tag, write release.json",
+	Short: "Create or bump a prerelease tag, write release.json",
 	RunE:  runRC,
 }
 
 func init() {
 	rootCmd.AddCommand(rcCmd)
+	rcCmd.Flags().BoolVar(&gitSHA, "git-sha", false, "Append git short SHA as build metadata (+g<sha>)")
 }
 
 func runRC(_ *cobra.Command, _ []string) error {
 	root := projectRoot()
+
+	label := prereleaseLabel
+	if label == "" {
+		label = "rc"
+	}
 
 	ch, err := changes.Read(root)
 	if err != nil {
@@ -42,11 +50,19 @@ func runRC(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	rcNum, err := git.LatestRCNumber(root, base)
+	num, err := git.LatestPrereleaseNumber(root, base, label)
 	if err != nil {
 		return err
 	}
-	tag := fmt.Sprintf("%s-rc.%d", base, rcNum+1)
+
+	tag := fmt.Sprintf("%s-%s.%d", base, label, num+1)
+	if gitSHA {
+		sha, err := git.ShortSHA(root)
+		if err != nil {
+			return err
+		}
+		tag += "+g" + sha
+	}
 
 	commit, err := git.CurrentCommit(root)
 	if err != nil {
@@ -74,6 +90,11 @@ func runRC(_ *cobra.Command, _ []string) error {
 
 	if err := release.WriteJSON(output, data); err != nil {
 		return err
+	}
+	if notes != "" {
+		if err := release.WriteNotes(notes, data, os.Getenv("GITHUB_REPOSITORY")); err != nil {
+			return err
+		}
 	}
 	if err := git.CreateTag(root, tag); err != nil {
 		return err

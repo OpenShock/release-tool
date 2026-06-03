@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Release mode
+        required: true
+        default: stable
+        options:
+          - rc
+          - stable
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run release tool
+        id: release
+        uses: ./
+        with:
+          mode: ${{ inputs.mode }}
+          notes-output: release-notes.md
+          # prerelease-label and git-sha left at defaults for manual stable cuts;
+          # override here if you want a labelled manual RC (e.g. prerelease-label: rc, git-sha: true)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push commit and tag
+        if: steps.release.outputs.skip != 'true'
+        run: |
+          git push origin HEAD:${{ github.ref_name }}
+          git push origin ${{ steps.release.outputs.tag }}
+
+      - name: Build release binaries
+        if: steps.release.outputs.skip != 'true'
+        run: |
+          mkdir -p dist
+          declare -A exts=([windows]=".exe")
+          for platform in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            GOOS="${platform%/*}" GOARCH="${platform#*/}"
+            out="dist/release-tool-${GOOS}-${GOARCH}${exts[$GOOS]}"
+            GOOS=$GOOS GOARCH=$GOARCH go build -ldflags "-s -w" -o "$out" .
+          done
+
+      - name: Create GitHub release
+        if: steps.release.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PRERELEASE_FLAG=""
+          [ "${{ steps.release.outputs.prerelease }}" = "true" ] && PRERELEASE_FLAG="--prerelease"
+          gh release create "${{ steps.release.outputs.tag }}" \
+            --title "${{ steps.release.outputs.tag }}" \
+            --notes-file release-notes.md \
+            $PRERELEASE_FLAG \
+            dist/*

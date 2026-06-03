@@ -61,7 +61,7 @@ func runStable(_ *cobra.Command, _ []string) error {
 		EnrichPR:   !dryRun,
 	})
 
-	entry := release.RenderChangelog(data, githubRepo)
+	entry := release.RenderChangelog(data, os.Getenv("GITHUB_REPOSITORY"))
 
 	if dryRun {
 		fmt.Fprintf(os.Stderr, "Would create tag: %s\n", tag)
@@ -73,6 +73,11 @@ func runStable(_ *cobra.Command, _ []string) error {
 
 	if err := release.WriteJSON(output, data); err != nil {
 		return err
+	}
+	if notes != "" {
+		if err := release.WriteNotes(notes, data, os.Getenv("GITHUB_REPOSITORY")); err != nil {
+			return err
+		}
 	}
 
 	changelogPath := filepath.Join(root, "CHANGELOG.md")

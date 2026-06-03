@@ -8,15 +8,16 @@ import (
 )
 
 var (
-	dryRun     bool
-	output     string
-	githubRepo string
-	rootDir    string
+	dryRun          bool
+	output          string
+	notes           string
+	prereleaseLabel string
+	rootDir         string
 )
 
 var rootCmd = &cobra.Command{
 	Use:   "release-tool",
-	Short: "OpenShock release tool — manages .changes files and versioned releases",
+	Short: "OpenShock release tool - manages .changes files and versioned releases",
 }
 
 func Execute() {
@@ -29,7 +30,8 @@ func Execute() {
 func init() {
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Preview without making changes")
 	rootCmd.PersistentFlags().StringVar(&output, "output", "release.json", "Path to write release.json")
-	rootCmd.PersistentFlags().StringVar(&githubRepo, "github-repo", "", "GitHub repo slug (Owner/Repo) for CHANGELOG links")
+	rootCmd.PersistentFlags().StringVar(&notes, "notes", "", "Path to write markdown release notes")
+	rootCmd.PersistentFlags().StringVar(&prereleaseLabel, "prerelease-label", "", "Override prerelease label (e.g. rc, alpha, beta)")
 	rootCmd.PersistentFlags().StringVar(&rootDir, "root", "", "Root directory of the target repo (defaults to cwd)")
 }
 

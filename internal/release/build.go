@@ -118,3 +118,12 @@ func WriteJSON(path string, data *ReleaseData) error {
 	fmt.Fprintf(os.Stderr, "Wrote %s\n", path)
 	return nil
 }
+
+func WriteNotes(path string, data *ReleaseData, githubRepo string) error {
+	content := RenderChangelog(data, githubRepo)
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	fmt.Fprintf(os.Stderr, "Wrote %s\n", path)
+	return nil
+}
