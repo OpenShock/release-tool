@@ -1,0 +1,13 @@
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - ineffassign
+    - unused
+    - gosimple
+
+issues:
+  exclude-rules:
+    - text: "strings.Cut"
+      linters: [errcheck]

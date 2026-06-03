@@ -96,7 +96,10 @@ func runStable(_ *cobra.Command, _ []string) error {
 	}
 
 	changelogPath := filepath.Join(root, "CHANGELOG.md")
-	existing, _ := os.ReadFile(changelogPath)
+	existing, err := os.ReadFile(changelogPath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("reading CHANGELOG.md: %w", err)
+	}
 	if err := os.WriteFile(changelogPath, []byte(entry+"\n"+string(existing)), 0644); err != nil {
 		return fmt.Errorf("writing CHANGELOG.md: %w", err)
 	}
