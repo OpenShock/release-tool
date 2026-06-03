@@ -24,15 +24,15 @@ type NoticeEntry struct {
 }
 
 type ChangeEntry struct {
-	ID         string       `json:"id"`
-	Type       string       `json:"type"`
-	Breaking   bool         `json:"breaking"`
-	Categories []string     `json:"categories"`
-	Title      MDText       `json:"title"`
-	Body       *MDText      `json:"body,omitempty"`
-	ReleaseNote *MDText      `json:"release_note,omitempty"`
-	PR         *int         `json:"pr,omitempty"`
-	Notices    []NoticeEntry `json:"notices"`
+	ID          string        `json:"id"`
+	Type        string        `json:"type"`
+	Breaking    bool          `json:"breaking"`
+	Categories  []string      `json:"categories"`
+	Title       MDText        `json:"title"`
+	Body        *MDText       `json:"body,omitempty"`
+	ReleaseNote *MDText       `json:"release_note,omitempty"`
+	PR          *int          `json:"pr,omitempty"`
+	Notices     []NoticeEntry `json:"notices"`
 }
 
 type ReleaseData struct {
@@ -84,14 +84,14 @@ func BuildData(p BuildParams) *ReleaseData {
 
 	for _, c := range p.Changes {
 		entry := ChangeEntry{
-			ID:         c.Slug(),
-			Type:       c.Bump,
-			Breaking:   c.Breaking,
-			Categories: c.Categories,
-			Title:      MDText{Format: "markdown", Text: c.Title},
-			Body:       mdText(c.Body),
+			ID:          c.Slug(),
+			Type:        c.Bump,
+			Breaking:    c.Breaking,
+			Categories:  c.Categories,
+			Title:       MDText{Format: "markdown", Text: c.Title},
+			Body:        mdText(c.Body),
 			ReleaseNote: mdText(c.ReleaseNote),
-			Notices:    make([]NoticeEntry, len(c.Notices)),
+			Notices:     make([]NoticeEntry, len(c.Notices)),
 		}
 		for i, n := range c.Notices {
 			entry.Notices[i] = NoticeEntry{Level: n.Level, Message: n.Message}

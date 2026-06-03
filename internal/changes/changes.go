@@ -43,14 +43,14 @@ type Notice struct {
 }
 
 type Change struct {
-	Bump       string
-	Title      string
-	Body       string
+	Bump        string
+	Title       string
+	Body        string
 	ReleaseNote string
-	Notices    []Notice
-	Filename   string
-	Breaking   bool
-	Categories []string
+	Notices     []Notice
+	Filename    string
+	Breaking    bool
+	Categories  []string
 }
 
 func (c *Change) Slug() string {
@@ -67,7 +67,7 @@ type rawFrontmatter struct {
 
 var knownSections = map[string]bool{
 	"## Release Note": true,
-	"## Notices": true,
+	"## Notices":      true,
 }
 
 func splitSections(body string) (changelog, releaseNote, notices string) {
@@ -150,14 +150,14 @@ func parseFile(path string) (*Change, error) {
 	}
 
 	return &Change{
-		Bump:       fm.Type,
-		Title:      title,
-		Body:       strings.TrimSpace(body),
+		Bump:        fm.Type,
+		Title:       title,
+		Body:        strings.TrimSpace(body),
 		ReleaseNote: releaseNote,
-		Notices:    parseNotices(noticesRaw),
-		Filename:   filename,
-		Breaking:   breaking,
-		Categories: categories,
+		Notices:     parseNotices(noticesRaw),
+		Filename:    filename,
+		Breaking:    breaking,
+		Categories:  categories,
 	}, nil
 }
 

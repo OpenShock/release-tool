@@ -8,14 +8,14 @@ import (
 
 func makeChange(bump, title string, breaking bool, categories []string) *changes.Change {
 	return &changes.Change{
-		Bump:       bump,
-		Title:      title,
-		Body:       "body text",
+		Bump:        bump,
+		Title:       title,
+		Body:        "body text",
 		ReleaseNote: "release note text",
-		Breaking:   breaking,
-		Categories: categories,
-		Filename:   title + ".md",
-		Notices:    []changes.Notice{{Level: "warning", Message: "heads up"}},
+		Breaking:    breaking,
+		Categories:  categories,
+		Filename:    title + ".md",
+		Notices:     []changes.Notice{{Level: "warning", Message: "heads up"}},
 	}
 }
 
@@ -66,8 +66,8 @@ func TestBuildData_Changes(t *testing.T) {
 		makeChange("major", "Breaking change", true, []string{"core"}),
 	}
 	data := BuildData(BuildParams{
-		Tag:     "2.0.0",
-		Changes: ch,
+		Tag:      "2.0.0",
+		Changes:  ch,
 		EnrichPR: false,
 	})
 
