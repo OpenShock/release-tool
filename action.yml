@@ -1,0 +1,66 @@
+name: OpenShock Release Tool
+description: Reads .changes/ files, bumps semver, writes release.json, tags the commit.
+
+inputs:
+  mode:
+    description: Release mode — 'rc' or 'stable'
+    required: true
+  dry-run:
+    description: Preview without making changes (prints JSON to stdout, no tag created)
+    required: false
+    default: 'false'
+  output:
+    description: Path to write release.json (relative to the consuming repo root)
+    required: false
+    default: release.json
+  github-repo:
+    description: GitHub repo slug (Owner/Repo) used for the CHANGELOG full-diff link. Defaults to the current repo.
+    required: false
+    default: ${{ github.repository }}
+  go-version:
+    description: Go version to use
+    required: false
+    default: '1.22'
+
+outputs:
+  tag:
+    description: The tag that was created (empty when skip=true)
+    value: ${{ steps.run.outputs.tag }}
+  prerelease:
+    description: Whether the created tag is a prerelease
+    value: ${{ steps.run.outputs.prerelease }}
+  skip:
+    description: true when there were no pending changes and no tag was created
+    value: ${{ steps.run.outputs.skip }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v5
+      with:
+        go-version: ${{ inputs.go-version }}
+        cache: true
+        cache-dependency-path: ${{ github.action_path }}/go.sum
+
+    - name: Configure git identity
+      shell: bash
+      run: |
+        git config user.name  "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+    - name: Run release tool
+      id: run
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      env:
+        DRY_RUN: ${{ inputs.dry-run }}
+      run: |
+        ARGS=(
+          --root        "${{ github.workspace }}"
+          --output      "${{ github.workspace }}/${{ inputs.output }}"
+          --github-repo "${{ inputs.github-repo }}"
+        )
+        if [ "$DRY_RUN" = "true" ]; then
+          ARGS+=(--dry-run)
+        fi
+        go run . "${ARGS[@]}" ${{ inputs.mode }}
