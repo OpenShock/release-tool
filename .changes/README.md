@@ -30,4 +30,4 @@ Run `release-tool new "<title>" --type minor` to generate one automatically.
 
 ## Special files
 
-- `_headline.md` — optional release headline shown at the top of the changelog entry
+- `_headline.md` - optional release headline shown at the top of the changelog entry

@@ -104,7 +104,7 @@ func TestBuildData_Changes(t *testing.T) {
 func TestBuildData_NoPreviousVersion(t *testing.T) {
 	data := BuildData(BuildParams{
 		Tag:      "0.1.0",
-		Previous: "", // bootstrap — no previous tag
+		Previous: "", // bootstrap - no previous tag
 		Changes:  []*changes.Change{{Bump: "minor", Title: "First feature", Filename: "first.md", Categories: []string{}}},
 		EnrichPR: false,
 	})

@@ -91,9 +91,9 @@ func runNewInteractive(args []string) error {
 		fields = append(fields, huh.NewSelect[string]().
 			Title("Bump type").
 			Options(
-				huh.NewOption("patch — backwards-compatible bug fix", "patch"),
-				huh.NewOption("minor — new backwards-compatible feature", "minor"),
-				huh.NewOption("major — breaking change", "major"),
+				huh.NewOption("patch - backwards-compatible bug fix", "patch"),
+				huh.NewOption("minor - new backwards-compatible feature", "minor"),
+				huh.NewOption("major - breaking change", "major"),
 			).
 			Value(&bumpType))
 	}
