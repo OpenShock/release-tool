@@ -71,13 +71,14 @@ runs:
         RELEASE_NOTES: ${{ inputs.notes-output }}
         PRERELEASE_LABEL: ${{ inputs.prerelease-label }}
         GIT_SHA: ${{ inputs.git-sha }}
+        WORKSPACE: ${{ github.workspace }}
       run: |
         ARGS=(
-          --root   "${{ github.workspace }}"
-          --output "${{ github.workspace }}/$RELEASE_OUTPUT"
+          --root   "$WORKSPACE"
+          --output "$WORKSPACE/$RELEASE_OUTPUT"
         )
         if [ -n "$RELEASE_NOTES" ]; then
-          ARGS+=(--notes "${{ github.workspace }}/$RELEASE_NOTES")
+          ARGS+=(--notes "$WORKSPACE/$RELEASE_NOTES")
         fi
         if [ -n "$PRERELEASE_LABEL" ]; then
           ARGS+=(--prerelease-label "$PRERELEASE_LABEL")
