@@ -2,6 +2,7 @@ package changes
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -214,6 +215,35 @@ func parseFile(path string) (*Change, error) {
 	}, nil
 }
 
+// invalidFilesErr aggregates per-file parse/validation errors into one error.
+func invalidFilesErr(errs []string) error {
+	return fmt.Errorf("invalid change files:\n  - %s", strings.Join(errs, "\n  - "))
+}
+
+// parseAll parses each path into a Change, aggregating errors. When skipMissing
+// is set, non-existent files are silently skipped instead of reported.
+func parseAll(paths []string, skipMissing bool) ([]*Change, error) {
+	var (
+		out  []*Change
+		errs []string
+	)
+	for _, p := range paths {
+		ch, err := parseFile(p)
+		if err != nil {
+			if skipMissing && errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			errs = append(errs, err.Error())
+			continue
+		}
+		out = append(out, ch)
+	}
+	if len(errs) > 0 {
+		return nil, invalidFilesErr(errs)
+	}
+	return out, nil
+}
+
 func Read(root string) ([]*Change, error) {
 	dir := filepath.Join(root, Dir)
 	entries, err := os.ReadDir(dir)
@@ -235,21 +265,9 @@ func Read(root string) ([]*Change, error) {
 	}
 	sort.Strings(paths)
 
-	var (
-		out  []*Change
-		errs []string
-	)
-	for _, p := range paths {
-		ch, err := parseFile(p)
-		if err != nil {
-			errs = append(errs, err.Error())
-			continue
-		}
-		out = append(out, ch)
-	}
-
-	if len(errs) > 0 {
-		return nil, fmt.Errorf("invalid change files:\n  - %s", strings.Join(errs, "\n  - "))
+	out, err := parseAll(paths, false)
+	if err != nil {
+		return nil, err
 	}
 	if err := validateCategories(root, out); err != nil {
 		return nil, err
@@ -282,35 +300,27 @@ func validateCategories(root string, list []*Change) error {
 		}
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("invalid change files:\n  - %s", strings.Join(errs, "\n  - "))
+		return invalidFilesErr(errs)
 	}
 	return nil
 }
 
 // ReadSubset reads and parses only the named files (basenames) from .changes/.
-// Missing files are silently skipped.
+// Missing files are silently skipped. Names are reduced to their basename so a
+// caller cannot escape .changes/ via path separators.
 func ReadSubset(root string, filenames []string) ([]*Change, error) {
 	sorted := make([]string, len(filenames))
 	copy(sorted, filenames)
 	sort.Strings(sorted)
 
-	var (
-		out  []*Change
-		errs []string
-	)
+	paths := make([]string, 0, len(sorted))
 	for _, name := range sorted {
-		ch, err := parseFile(filepath.Join(root, Dir, name))
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			errs = append(errs, err.Error())
-			continue
-		}
-		out = append(out, ch)
+		paths = append(paths, filepath.Join(root, Dir, filepath.Base(name)))
 	}
-	if len(errs) > 0 {
-		return nil, fmt.Errorf("invalid change files:\n  - %s", strings.Join(errs, "\n  - "))
+
+	out, err := parseAll(paths, true)
+	if err != nil {
+		return nil, err
 	}
 	if err := validateCategories(root, out); err != nil {
 		return nil, err

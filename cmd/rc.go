@@ -126,14 +126,7 @@ func runRC(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	prevTag := ""
-	if latest != "" {
-		prevTag = cfg.TagPrefix + latest
-	}
-	var maintainers map[string]bool
-	if !dryRun {
-		maintainers = git.Maintainers(root)
-	}
+	prevTag, maintainers := enrichment(root, cfg, latest)
 
 	data := release.BuildData(release.BuildParams{
 		Tag:         tag,

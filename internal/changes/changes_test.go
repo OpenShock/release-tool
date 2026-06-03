@@ -347,6 +347,41 @@ Unknown category
 	}
 }
 
+func TestReadSubset_SkipsMissing(t *testing.T) {
+	dir := t.TempDir()
+	writeChange(t, dir, "present.md", `---
+type: patch
+---
+Present change
+`)
+	// "absent.md" was never written; it must be skipped, not error.
+	ch, err := ReadSubset(dir, []string{"present.md", "absent.md"})
+	if err != nil {
+		t.Fatalf("missing file should be skipped, got: %v", err)
+	}
+	if len(ch) != 1 || ch[0].Filename != "present.md" {
+		t.Errorf("expected only present.md, got %+v", ch)
+	}
+}
+
+func TestReadSubset_BasenameGuard(t *testing.T) {
+	dir := t.TempDir()
+	writeChange(t, dir, "real.md", `---
+type: patch
+---
+Real change
+`)
+	// A name with path separators must resolve to its basename within .changes/,
+	// never escape the directory.
+	ch, err := ReadSubset(dir, []string{"../../real.md"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ch) != 1 || ch[0].Filename != "real.md" {
+		t.Errorf("expected basename-resolved real.md, got %+v", ch)
+	}
+}
+
 func TestRead_CategoryNoAllowlist(t *testing.T) {
 	dir := t.TempDir()
 	// No config.json: any category is accepted (pre-existing behavior).

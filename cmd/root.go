@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/OpenShock/release-tool/internal/changes"
+	"github.com/OpenShock/release-tool/internal/git"
 	"github.com/spf13/cobra"
 )
 
@@ -65,6 +67,20 @@ func writeGitHubOutputs(tag string, prerelease bool) {
 		pre = "true"
 	}
 	fmt.Fprintf(f, "tag=%s\nprerelease=%s\nskip=false\n", tag, pre)
+}
+
+// enrichment derives the GitHub-enrichment inputs shared by the stable and rc
+// commands: the literal previous tag (ref for the contributors compare) and the
+// maintainer exclusion set. Maintainers are fetched only outside dry-run, to
+// avoid network calls during previews.
+func enrichment(root string, cfg *changes.Config, latest string) (prevTag string, maintainers map[string]bool) {
+	if latest != "" {
+		prevTag = cfg.TagPrefix + latest
+	}
+	if !dryRun {
+		maintainers = git.Maintainers(root)
+	}
+	return prevTag, maintainers
 }
 
 func writeGitHubOutputSkip() {

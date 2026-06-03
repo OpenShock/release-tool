@@ -3,12 +3,29 @@ package git
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 )
+
+// ghAPI runs `gh api <args...>` in root and returns stdout. The gh CLI handles
+// auth (GH_TOKEN); a non-nil error means gh is missing, unauthenticated, or the
+// request failed, and carries gh's own stderr for diagnostics.
+func ghAPI(root string, args ...string) ([]byte, error) {
+	cmd := exec.Command("gh", append([]string{"api"}, args...)...)
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("gh api: %s", strings.TrimSpace(string(ee.Stderr)))
+		}
+		return nil, fmt.Errorf("gh api: %w", err)
+	}
+	return out, nil
+}
 
 func run(root string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
@@ -141,12 +158,11 @@ func ContributorsSince(root, previousTag string) []string {
 	if previousTag == "" {
 		return nil
 	}
-	cmd := exec.Command("gh", "api",
+	out, err := ghAPI(root,
 		fmt.Sprintf("repos/{owner}/{repo}/compare/%s...HEAD", previousTag),
 		"--jq", "[.commits[].author.login | select(. != null)]")
-	cmd.Dir = root
-	out, err := cmd.Output()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not fetch contributors (%v)\n", err)
 		return nil
 	}
 	var logins []string
@@ -171,11 +187,10 @@ func ContributorsSince(root, previousTag string) []string {
 // contributors footer. Returns nil if gh is unavailable (e.g. the token lacks
 // push access), in which case no maintainer filtering is applied.
 func Maintainers(root string) map[string]bool {
-	cmd := exec.Command("gh", "api", "repos/{owner}/{repo}/collaborators", "--paginate",
+	out, err := ghAPI(root, "repos/{owner}/{repo}/collaborators", "--paginate",
 		"--jq", ".[] | select(.permissions.admin or .permissions.maintain) | .login")
-	cmd.Dir = root
-	out, err := cmd.Output()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not fetch maintainers; contributors footer will not exclude them (%v)\n", err)
 		return nil
 	}
 	set := map[string]bool{}
@@ -195,9 +210,7 @@ func DerivePRNumber(root, filename string) int {
 	if err != nil || sha == "" {
 		return 0
 	}
-	cmd := exec.Command("gh", "api", fmt.Sprintf("repos/{owner}/{repo}/commits/%s/pulls", sha))
-	cmd.Dir = root
-	out, err := cmd.Output()
+	out, err := ghAPI(root, fmt.Sprintf("repos/{owner}/{repo}/commits/%s/pulls", sha))
 	if err != nil {
 		return 0
 	}
