@@ -6,11 +6,15 @@ branding:
 
 inputs:
   mode:
-    description: Release mode - 'rc' or 'stable'
+    description: >
+      Release mode: 'stable' (consumes .changes, updates CHANGELOG),
+      'beta' (prerelease, .changes since last beta or stable tag; use prerelease-label to set label e.g. rc, alpha, beta),
+      'develop' (prerelease, .changes since last develop/beta/stable tag, always tags with +sha).
     required: true
     options:
-      - rc
       - stable
+      - beta
+      - develop
   dry-run:
     description: Preview without making changes (prints JSON to stdout, no tag created)
     required: false
@@ -77,16 +81,25 @@ runs:
           --root   "$WORKSPACE"
           --output "$WORKSPACE/$RELEASE_OUTPUT"
         )
-        if [ -n "$RELEASE_NOTES" ]; then
-          ARGS+=(--notes "$WORKSPACE/$RELEASE_NOTES")
-        fi
-        if [ -n "$PRERELEASE_LABEL" ]; then
-          ARGS+=(--prerelease-label "$PRERELEASE_LABEL")
-        fi
-        if [ "$GIT_SHA" = "true" ]; then
-          ARGS+=(--git-sha)
-        fi
-        if [ "$DRY_RUN" = "true" ]; then
-          ARGS+=(--dry-run)
-        fi
-        go run . "${ARGS[@]}" "$RELEASE_MODE"
+        [ -n "$RELEASE_NOTES" ] && ARGS+=(--notes "$WORKSPACE/$RELEASE_NOTES")
+        [ "$DRY_RUN" = "true" ] && ARGS+=(--dry-run)
+
+        case "$RELEASE_MODE" in
+          stable)
+            go run . "${ARGS[@]}" stable
+            ;;
+          beta)
+            go run . "${ARGS[@]}" rc \
+              --prerelease-label "${PRERELEASE_LABEL:-beta}"
+            ;;
+          develop)
+            go run . "${ARGS[@]}" rc \
+              --prerelease-label "${PRERELEASE_LABEL:-develop}" \
+              --git-sha \
+              --allow-empty
+            ;;
+          *)
+            echo "Unknown mode: $RELEASE_MODE" >&2
+            exit 1
+            ;;
+        esac

@@ -31,7 +31,7 @@ jobs:
         id: release
         uses: ./
         with:
-          mode: ${{ inputs.mode == 'stable' && 'stable' || 'rc' }}
+          mode: ${{ inputs.mode == 'stable' && 'stable' || 'beta' }}
           prerelease-label: ${{ inputs.mode == 'stable' && '' || inputs.label }}
           notes-output: release-notes.md
         env:

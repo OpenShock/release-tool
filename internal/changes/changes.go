@@ -201,6 +201,34 @@ func Read(root string) ([]*Change, error) {
 	return out, nil
 }
 
+// ReadSubset reads and parses only the named files (basenames) from .changes/.
+// Missing files are silently skipped.
+func ReadSubset(root string, filenames []string) ([]*Change, error) {
+	sorted := make([]string, len(filenames))
+	copy(sorted, filenames)
+	sort.Strings(sorted)
+
+	var (
+		out  []*Change
+		errs []string
+	)
+	for _, name := range sorted {
+		ch, err := parseFile(filepath.Join(root, Dir, name))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			errs = append(errs, err.Error())
+			continue
+		}
+		out = append(out, ch)
+	}
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("invalid change files:\n  - %s", strings.Join(errs, "\n  - "))
+	}
+	return out, nil
+}
+
 func ReadHeadline(root string) string {
 	data, err := os.ReadFile(filepath.Join(root, Dir, HeadlineFile))
 	if err != nil {

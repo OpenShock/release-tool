@@ -4,12 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 
 	"github.com/OpenShock/release-tool/internal/changes"
 	"github.com/OpenShock/release-tool/internal/git"
 	"github.com/OpenShock/release-tool/internal/release"
 	"github.com/spf13/cobra"
 )
+
+var allowEmpty bool
 
 var rcCmd = &cobra.Command{
 	Use:   "rc",
@@ -19,22 +22,61 @@ var rcCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(rcCmd)
+	rcCmd.Flags().BoolVar(&allowEmpty, "allow-empty", false,
+		"Create a tag even when no .changes files exist, using the last stable version as the base (no bump)")
+}
+
+// sincePatterns returns tag-matching regexps ordered by priority for the given
+// label. develop looks back to the last develop, beta, or stable tag; beta
+// looks back to the last beta or stable tag; other labels return nil (read all).
+func sincePatterns(prefix, label string) []*regexp.Regexp {
+	q := regexp.QuoteMeta(prefix)
+	stable := regexp.MustCompile(`^` + q + `\d+\.\d+\.\d+$`)
+	switch label {
+	case "develop":
+		return []*regexp.Regexp{
+			regexp.MustCompile(`^` + q + `\d+\.\d+\.\d+-develop\b`),
+			regexp.MustCompile(`^` + q + `\d+\.\d+\.\d+-beta\.\d+`),
+			stable,
+		}
+	case "beta":
+		return []*regexp.Regexp{
+			regexp.MustCompile(`^` + q + `\d+\.\d+\.\d+-beta\.\d+`),
+			stable,
+		}
+	default:
+		return nil
+	}
+}
+
+func gatherChangesSince(root string, patterns []*regexp.Regexp) ([]*changes.Change, error) {
+	ref, err := git.LatestTagMatching(root, patterns)
+	if err != nil {
+		return nil, err
+	}
+	filenames, err := git.ChangedChangeFilesSinceRef(root, ref)
+	if err != nil {
+		return nil, err
+	}
+	return changes.ReadSubset(root, filenames)
 }
 
 func runRC(_ *cobra.Command, _ []string) error {
 	root := projectRoot()
 
-	ch, err := changes.Read(root)
+	cfg, err := changes.ReadConfig(root)
 	if err != nil {
 		return err
 	}
-	if len(ch) == 0 {
-		fmt.Println("No pending changes, nothing to release.")
-		writeGitHubOutputSkip()
-		return nil
-	}
 
-	cfg, err := changes.ReadConfig(root)
+	patterns := sincePatterns(cfg.TagPrefix, prereleaseLabel)
+
+	var ch []*changes.Change
+	if patterns != nil {
+		ch, err = gatherChangesSince(root, patterns)
+	} else {
+		ch, err = changes.Read(root)
+	}
 	if err != nil {
 		return err
 	}
@@ -43,9 +85,24 @@ func runRC(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	base, err := release.ComputeNext(ch, latest)
-	if err != nil {
-		return err
+
+	var base string
+	if len(ch) == 0 {
+		if !allowEmpty {
+			fmt.Println("No pending changes, nothing to release.")
+			writeGitHubOutputSkip()
+			return nil
+		}
+		// No changes: use last stable as base, no bump.
+		base = latest
+		if base == "" {
+			base = "0.0.0"
+		}
+	} else {
+		base, err = release.ComputeNext(ch, latest)
+		if err != nil {
+			return err
+		}
 	}
 
 	tag := cfg.TagPrefix + base
