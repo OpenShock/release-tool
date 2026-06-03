@@ -6,10 +6,12 @@ on:
       mode:
         description: Release mode
         required: true
-        default: stable
+        default: alpha
         options:
-          - rc
           - stable
+          - rc
+          - alpha
+          - beta
 
 jobs:
   release:
@@ -22,14 +24,24 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Resolve prerelease label
+        id: cfg
+        shell: bash
+        run: |
+          case "${{ inputs.mode }}" in
+            stable) echo "label="    >> "$GITHUB_OUTPUT" ;;
+            rc)     echo "label=rc"    >> "$GITHUB_OUTPUT" ;;
+            alpha)  echo "label=alpha" >> "$GITHUB_OUTPUT" ;;
+            beta)   echo "label=beta"  >> "$GITHUB_OUTPUT" ;;
+          esac
+
       - name: Run release tool
         id: release
         uses: ./
         with:
-          mode: ${{ inputs.mode }}
+          mode: stable
+          prerelease-label: ${{ steps.cfg.outputs.label }}
           notes-output: release-notes.md
-          # prerelease-label and git-sha left at defaults for manual stable cuts;
-          # override here if you want a labelled manual RC (e.g. prerelease-label: rc, git-sha: true)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

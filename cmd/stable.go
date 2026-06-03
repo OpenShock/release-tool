@@ -39,9 +39,19 @@ func runStable(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	tag, err := release.ComputeNext(ch, latest)
+	base, err := release.ComputeNext(ch, latest)
 	if err != nil {
 		return err
+	}
+
+	tag := base
+	isPrerelease := prereleaseLabel != ""
+	if isPrerelease {
+		num, err := git.LatestPrereleaseNumber(root, base, prereleaseLabel)
+		if err != nil {
+			return err
+		}
+		tag = fmt.Sprintf("%s-%s.%d", base, prereleaseLabel, num+1)
 	}
 
 	commit, err := git.CurrentCommit(root)
@@ -54,9 +64,9 @@ func runStable(_ *cobra.Command, _ []string) error {
 		Previous:   latest,
 		Changes:    ch,
 		Headline:   changes.ReadHeadline(root),
-		Prerelease: false,
+		Prerelease: isPrerelease,
 		Commit:     commit,
-		Version:    tag,
+		Version:    base,
 		Root:       root,
 		EnrichPR:   !dryRun,
 	})
@@ -108,6 +118,6 @@ func runStable(_ *cobra.Command, _ []string) error {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "Created tag: %s\n", tag)
-	writeGitHubOutputs(tag, false)
+	writeGitHubOutputs(tag, isPrerelease)
 	return nil
 }
