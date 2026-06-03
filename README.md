@@ -118,6 +118,7 @@ release-tool --prerelease-label develop --git-sha rc --allow-empty
 type: minor          # major | minor | patch
 breaking: false      # optional; major defaults to true
 categories: [api]    # optional
+pr: 123              # optional; see below
 ---
 Title shown in changelog
 
@@ -131,6 +132,14 @@ Plain-language note for end users. Included in `release.json`, not in `CHANGELOG
 - info: optional migration or rollout note
 ```
 
+`pr` is tri-state:
+- **absent**: the PR number is derived from git history (the PR that introduced the file)
+- **integer** (`pr: 123`): used verbatim, no derivation
+- **`pr: null`**: suppresses the PR link entirely
+
+Notice levels must be one of `info`, `warning`, or `error`, and each line must be
+`- level: message`. Invalid levels or malformed lines fail validation (caught by `status`).
+
 Special files in `.changes/`:
 - `README.md`: local format reference created by `release-tool init`
 - `_headline.md`: optional markdown shown at the top of the generated changelog entry
@@ -140,9 +149,29 @@ Example `.changes/config.json`:
 
 ```json
 {
-  "tag_prefix": "v"
+  "tag_prefix": "v",
+  "categories": ["api", "firmware", "frontend"]
 }
 ```
+
+`categories`, when present, is an allowlist: change files declaring a category
+outside the list fail validation. When omitted, any category string is accepted.
+
+## Contributors & PR enrichment
+
+When the `gh` CLI is available and authenticated (`GH_TOKEN`), `stable` and `rc`
+enrich the release with GitHub data:
+
+- **PR numbers** are derived for change files that don't pin one (see `pr` above).
+- **Contributors** — every commit author since the previous tag is recorded in
+  `release.json` (`contributors`), and the generated notes gain a `### Contributors`
+  footer thanking them, excluding repo maintainers (admin/maintain collaborators)
+  and `*[bot]` accounts.
+
+Both require the checkout to include tags and history (`fetch-depth: 0`) so the
+previous tag is a resolvable ref. Maintainer detection needs a token with push
+access; without it, the footer simply thanks everyone. Enrichment is skipped
+under `--dry-run`.
 
 ## Common flags
 
@@ -157,12 +186,12 @@ Global flags available to `stable`, `rc`, `status`, `init`, and `new`:
 
 ## GitHub Action
 
-The composite action wraps the CLI and exposes three modes:
+The composite action wraps the CLI and exposes four modes:
 
 ```yaml
 - uses: OpenShock/release-tool@v1
   with:
-    mode: stable               # stable | beta | develop
+    mode: stable               # stable | beta | develop | status
     dry-run: false
     output: release.json
     notes-output: release-notes.md
@@ -174,6 +203,7 @@ Mode behavior:
 - `stable`: consumes pending change files and updates `CHANGELOG.md`
 - `beta`: creates prerelease tags from changes since the last beta or stable tag
 - `develop`: creates prerelease tags from changes since the last develop, beta, or stable tag, always with git SHA metadata and allowing empty cuts
+- `status`: validates pending changes and prints the next version without creating a tag (useful as a PR check)
 
 Action outputs:
 - `tag`: created tag, empty when skipped

@@ -6,7 +6,9 @@ import (
 )
 
 // RenderChangelog derives a CHANGELOG.md entry from a ReleaseData struct.
-func RenderChangelog(data *ReleaseData, githubRepo string) string {
+// maintainers (lowercased logins) and any *[bot] accounts are excluded from
+// the Contributors footer; pass nil to apply no maintainer filtering.
+func RenderChangelog(data *ReleaseData, githubRepo string, maintainers map[string]bool) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "# Version %s Release Notes\n\n", data.Tag)
@@ -68,6 +70,17 @@ func RenderChangelog(data *ReleaseData, githubRepo string) string {
 			fmt.Fprintf(&b, "- **%s**: %s\n", strings.ToUpper(an.notice.Level), an.notice.Message)
 		}
 		b.WriteByte('\n')
+	}
+
+	var thanks []string
+	for _, u := range data.Contributors {
+		if maintainers[strings.ToLower(u)] || strings.HasSuffix(u, "[bot]") {
+			continue
+		}
+		thanks = append(thanks, "@"+u)
+	}
+	if len(thanks) > 0 {
+		fmt.Fprintf(&b, "### Contributors\n\nThanks to %s for contributing to this release!\n\n", strings.Join(thanks, ", "))
 	}
 
 	if data.PreviousVersion != nil && githubRepo != "" {

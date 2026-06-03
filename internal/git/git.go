@@ -132,6 +132,62 @@ func LatestTagMatching(root string, patterns []*regexp.Regexp) (string, error) {
 	return "", nil
 }
 
+// ContributorsSince returns the deduplicated commit-author logins (preserving
+// first-seen order, case-insensitive dedup) between previousTag and HEAD via
+// gh api. No filtering: bots and maintainers are included. previousTag must be
+// a real ref (the literal tag, including prefix), not a bare version. Returns
+// nil if gh is unavailable or previousTag is empty.
+func ContributorsSince(root, previousTag string) []string {
+	if previousTag == "" {
+		return nil
+	}
+	cmd := exec.Command("gh", "api",
+		fmt.Sprintf("repos/{owner}/{repo}/compare/%s...HEAD", previousTag),
+		"--jq", "[.commits[].author.login | select(. != null)]")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var logins []string
+	if json.Unmarshal(out, &logins) != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var res []string
+	for _, l := range logins {
+		key := strings.ToLower(l)
+		if l == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		res = append(res, l)
+	}
+	return res
+}
+
+// Maintainers returns the set of repo collaborator logins (lowercased) that
+// have admin or maintain permission, used to exclude them from the
+// contributors footer. Returns nil if gh is unavailable (e.g. the token lacks
+// push access), in which case no maintainer filtering is applied.
+func Maintainers(root string) map[string]bool {
+	cmd := exec.Command("gh", "api", "repos/{owner}/{repo}/collaborators", "--paginate",
+		"--jq", ".[] | select(.permissions.admin or .permissions.maintain) | .login")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	set := map[string]bool{}
+	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			set[strings.ToLower(l)] = true
+		}
+	}
+	return set
+}
+
 // DerivePRNumber finds the PR that introduced .changes/<filename> via gh api.
 // Returns 0 if gh is unavailable or the commit has no associated PR.
 func DerivePRNumber(root, filename string) int {

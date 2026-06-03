@@ -45,18 +45,20 @@ type ReleaseData struct {
 	Commit          string        `json:"commit"`
 	Headline        *MDText       `json:"headline"`
 	Changes         []ChangeEntry `json:"changes"`
+	Contributors    []string      `json:"contributors"`
 }
 
 type BuildParams struct {
-	Tag        string
-	Previous   string
-	Changes    []*changes.Change
-	Headline   string
-	Prerelease bool
-	Commit     string
-	Version    string
-	Root       string
-	EnrichPR   bool
+	Tag         string
+	Previous    string
+	PreviousTag string // literal previous tag (with prefix); ref for the contributors compare
+	Changes     []*changes.Change
+	Headline    string
+	Prerelease  bool
+	Commit      string
+	Version     string
+	Root        string
+	EnrichPR    bool
 }
 
 func mdText(text string) *MDText {
@@ -96,12 +98,25 @@ func BuildData(p BuildParams) *ReleaseData {
 		for i, n := range c.Notices {
 			entry.Notices[i] = NoticeEntry{Level: n.Level, Message: n.Message}
 		}
-		if p.EnrichPR {
+		switch {
+		case c.PRExplicitNone:
+			// explicit `pr: null` in frontmatter suppresses the PR link.
+		case c.PR != nil:
+			pr := *c.PR
+			entry.PR = &pr
+		case p.EnrichPR:
 			if n := git.DerivePRNumber(p.Root, c.Filename); n != 0 {
 				entry.PR = &n
 			}
 		}
 		data.Changes = append(data.Changes, entry)
+	}
+
+	data.Contributors = []string{}
+	if p.EnrichPR && p.PreviousTag != "" {
+		if c := git.ContributorsSince(p.Root, p.PreviousTag); c != nil {
+			data.Contributors = c
+		}
 	}
 
 	return data
@@ -119,8 +134,8 @@ func WriteJSON(path string, data *ReleaseData) error {
 	return nil
 }
 
-func WriteNotes(path string, data *ReleaseData, githubRepo string) error {
-	content := RenderChangelog(data, githubRepo)
+func WriteNotes(path string, data *ReleaseData, githubRepo string, maintainers map[string]bool) error {
+	content := RenderChangelog(data, githubRepo, maintainers)
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}

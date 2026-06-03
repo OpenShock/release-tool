@@ -126,16 +126,26 @@ func runRC(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
+	prevTag := ""
+	if latest != "" {
+		prevTag = cfg.TagPrefix + latest
+	}
+	var maintainers map[string]bool
+	if !dryRun {
+		maintainers = git.Maintainers(root)
+	}
+
 	data := release.BuildData(release.BuildParams{
-		Tag:        tag,
-		Previous:   latest,
-		Changes:    ch,
-		Headline:   changes.ReadHeadline(root),
-		Prerelease: true,
-		Commit:     commit,
-		Version:    base,
-		Root:       root,
-		EnrichPR:   !dryRun,
+		Tag:         tag,
+		Previous:    latest,
+		PreviousTag: prevTag,
+		Changes:     ch,
+		Headline:    changes.ReadHeadline(root),
+		Prerelease:  true,
+		Commit:      commit,
+		Version:     base,
+		Root:        root,
+		EnrichPR:    !dryRun,
 	})
 
 	if dryRun {
@@ -149,7 +159,7 @@ func runRC(_ *cobra.Command, _ []string) error {
 		return err
 	}
 	if notes != "" {
-		if err := release.WriteNotes(notes, data, os.Getenv("GITHUB_REPOSITORY")); err != nil {
+		if err := release.WriteNotes(notes, data, os.Getenv("GITHUB_REPOSITORY"), maintainers); err != nil {
 			return err
 		}
 	}

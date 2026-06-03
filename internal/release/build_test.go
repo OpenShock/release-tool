@@ -101,6 +101,29 @@ func TestBuildData_Changes(t *testing.T) {
 	}
 }
 
+func TestBuildData_PRVerbatim(t *testing.T) {
+	pr := 99
+	data := BuildData(BuildParams{
+		Tag:      "1.0.0",
+		Changes:  []*changes.Change{{Bump: "patch", Title: "Fix", Filename: "f.md", Categories: []string{}, PR: &pr}},
+		EnrichPR: false, // derivation off; verbatim PR must still appear
+	})
+	if data.Changes[0].PR == nil || *data.Changes[0].PR != 99 {
+		t.Errorf("expected verbatim PR=99, got %v", data.Changes[0].PR)
+	}
+}
+
+func TestBuildData_PRExplicitNone(t *testing.T) {
+	data := BuildData(BuildParams{
+		Tag:      "1.0.0",
+		Changes:  []*changes.Change{{Bump: "patch", Title: "Fix", Filename: "f.md", Categories: []string{}, PRExplicitNone: true}},
+		EnrichPR: true, // derivation on, but explicit-none must suppress it
+	})
+	if data.Changes[0].PR != nil {
+		t.Errorf("expected PR=nil for explicit-none, got %v", *data.Changes[0].PR)
+	}
+}
+
 func TestBuildData_NoPreviousVersion(t *testing.T) {
 	data := BuildData(BuildParams{
 		Tag:      "0.1.0",

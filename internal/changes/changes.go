@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -20,6 +21,9 @@ const (
 
 type Config struct {
 	TagPrefix string `json:"tag_prefix"`
+	// Categories, when non-empty, is the allowlist of category names a change
+	// file may declare. When empty, any category string is accepted.
+	Categories []string `json:"categories"`
 }
 
 func ReadConfig(root string) (*Config, error) {
@@ -51,6 +55,11 @@ type Change struct {
 	Filename    string
 	Breaking    bool
 	Categories  []string
+	// PR, when non-nil, is the verbatim PR number set in frontmatter, used
+	// as-is instead of deriving from git history. PRExplicitNone records an
+	// explicit `pr: null`, which suppresses PR derivation entirely.
+	PR             *int
+	PRExplicitNone bool
 }
 
 func (c *Change) Slug() string {
@@ -63,6 +72,11 @@ type rawFrontmatter struct {
 	Type       string   `yaml:"type"`
 	Breaking   *bool    `yaml:"breaking"`
 	Categories []string `yaml:"categories"`
+	// PR is a raw node so we can distinguish absent (derive), explicit null
+	// (suppress), and an integer (verbatim). A zero Kind means the key was
+	// absent. (Must be a value, not a pointer: yaml.v3 only special-cases
+	// decoding into yaml.Node by value.)
+	PR yaml.Node `yaml:"pr"`
 }
 
 var knownSections = map[string]bool{
@@ -85,24 +99,42 @@ func splitSections(body string) (changelog, releaseNote, notices string) {
 	return join("_changelog"), join("release note"), join("notices")
 }
 
-func parseNotices(raw string) []Notice {
-	var out []Notice
+var validNoticeLevels = map[string]bool{"info": true, "warning": true, "error": true}
+
+func parseNotices(raw string) ([]Notice, error) {
+	var (
+		out  []Notice
+		errs []string
+	)
 	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" || !strings.HasPrefix(line, "- ") {
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "- ") {
+			errs = append(errs, fmt.Sprintf("malformed notice %q (must be `- level: message`)", line))
 			continue
 		}
 		body := strings.TrimSpace(line[2:])
 		idx := strings.Index(body, ":")
 		if idx < 0 {
+			errs = append(errs, fmt.Sprintf("malformed notice %q (missing `:` separator)", line))
+			continue
+		}
+		level := strings.ToLower(strings.TrimSpace(body[:idx]))
+		if !validNoticeLevels[level] {
+			errs = append(errs, fmt.Sprintf("invalid notice level %q (must be info, warning, or error)", level))
 			continue
 		}
 		out = append(out, Notice{
-			Level:   strings.ToLower(strings.TrimSpace(body[:idx])),
+			Level:   level,
 			Message: strings.TrimSpace(body[idx+1:]),
 		})
 	}
-	return out
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return out, nil
 }
 
 func parseFile(path string) (*Change, error) {
@@ -149,15 +181,36 @@ func parseFile(path string) (*Change, error) {
 		categories = []string{}
 	}
 
+	notices, err := parseNotices(noticesRaw)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", filename, err)
+	}
+
+	var prNum *int
+	prExplicitNone := false
+	if fm.PR.Kind != 0 { // key present
+		if fm.PR.Tag == "!!null" {
+			prExplicitNone = true
+		} else {
+			n, convErr := strconv.Atoi(strings.TrimSpace(fm.PR.Value))
+			if convErr != nil {
+				return nil, fmt.Errorf("%s: pr must be an integer or null, got %q", filename, fm.PR.Value)
+			}
+			prNum = &n
+		}
+	}
+
 	return &Change{
-		Bump:        fm.Type,
-		Title:       title,
-		Body:        strings.TrimSpace(body),
-		ReleaseNote: releaseNote,
-		Notices:     parseNotices(noticesRaw),
-		Filename:    filename,
-		Breaking:    breaking,
-		Categories:  categories,
+		Bump:           fm.Type,
+		Title:          title,
+		Body:           strings.TrimSpace(body),
+		ReleaseNote:    releaseNote,
+		Notices:        notices,
+		Filename:       filename,
+		Breaking:       breaking,
+		Categories:     categories,
+		PR:             prNum,
+		PRExplicitNone: prExplicitNone,
 	}, nil
 }
 
@@ -198,7 +251,40 @@ func Read(root string) ([]*Change, error) {
 	if len(errs) > 0 {
 		return nil, fmt.Errorf("invalid change files:\n  - %s", strings.Join(errs, "\n  - "))
 	}
+	if err := validateCategories(root, out); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// validateCategories rejects change files declaring categories outside the
+// allowlist in config.json. When the allowlist is empty, any category is
+// accepted (the pre-existing behavior).
+func validateCategories(root string, list []*Change) error {
+	cfg, err := ReadConfig(root)
+	if err != nil {
+		return err
+	}
+	if len(cfg.Categories) == 0 {
+		return nil
+	}
+	allowed := make(map[string]bool, len(cfg.Categories))
+	for _, c := range cfg.Categories {
+		allowed[c] = true
+	}
+	var errs []string
+	for _, ch := range list {
+		for _, cat := range ch.Categories {
+			if !allowed[cat] {
+				errs = append(errs, fmt.Sprintf("%s: unknown category %q (allowed: %s)",
+					ch.Filename, cat, strings.Join(cfg.Categories, ", ")))
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("invalid change files:\n  - %s", strings.Join(errs, "\n  - "))
+	}
+	return nil
 }
 
 // ReadSubset reads and parses only the named files (basenames) from .changes/.
@@ -225,6 +311,9 @@ func ReadSubset(root string, filenames []string) ([]*Change, error) {
 	}
 	if len(errs) > 0 {
 		return nil, fmt.Errorf("invalid change files:\n  - %s", strings.Join(errs, "\n  - "))
+	}
+	if err := validateCategories(root, out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

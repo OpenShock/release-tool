@@ -215,3 +215,148 @@ func TestChange_Slug(t *testing.T) {
 		t.Errorf("got %q", c.Slug())
 	}
 }
+
+func TestRead_PRVerbatim(t *testing.T) {
+	dir := t.TempDir()
+	writeChange(t, dir, "pinned.md", `---
+type: patch
+pr: 123
+---
+Fix with pinned PR
+`)
+	ch, err := Read(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ch[0].PR == nil || *ch[0].PR != 123 {
+		t.Errorf("expected PR=123, got %v", ch[0].PR)
+	}
+	if ch[0].PRExplicitNone {
+		t.Error("PRExplicitNone should be false when a number is given")
+	}
+}
+
+func TestRead_PRExplicitNone(t *testing.T) {
+	dir := t.TempDir()
+	writeChange(t, dir, "nopr.md", `---
+type: patch
+pr: null
+---
+Fix without a PR
+`)
+	ch, err := Read(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ch[0].PR != nil {
+		t.Errorf("expected PR=nil, got %v", *ch[0].PR)
+	}
+	if !ch[0].PRExplicitNone {
+		t.Error("expected PRExplicitNone=true for `pr: null`")
+	}
+}
+
+func TestRead_PRAbsent(t *testing.T) {
+	dir := t.TempDir()
+	writeChange(t, dir, "auto.md", `---
+type: patch
+---
+Fix with derived PR
+`)
+	ch, err := Read(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ch[0].PR != nil || ch[0].PRExplicitNone {
+		t.Errorf("absent pr: should leave PR=nil and PRExplicitNone=false, got PR=%v none=%v", ch[0].PR, ch[0].PRExplicitNone)
+	}
+}
+
+func TestRead_PRInvalid(t *testing.T) {
+	dir := t.TempDir()
+	writeChange(t, dir, "badpr.md", `---
+type: patch
+pr: not-a-number
+---
+Fix
+`)
+	if _, err := Read(dir); err == nil {
+		t.Error("expected error for non-integer pr")
+	}
+}
+
+func TestRead_InvalidNoticeLevel(t *testing.T) {
+	dir := t.TempDir()
+	writeChange(t, dir, "notice.md", `---
+type: patch
+---
+Fix
+
+## Notices
+- warming: typo in the level
+`)
+	if _, err := Read(dir); err == nil {
+		t.Error("expected error for invalid notice level")
+	}
+}
+
+func TestRead_MalformedNotice(t *testing.T) {
+	dir := t.TempDir()
+	writeChange(t, dir, "notice.md", `---
+type: patch
+---
+Fix
+
+## Notices
+- this line has no colon separator
+`)
+	if _, err := Read(dir); err == nil {
+		t.Error("expected error for malformed notice line")
+	}
+}
+
+func TestRead_CategoryAllowlist(t *testing.T) {
+	dir := t.TempDir()
+	changesDir := filepath.Join(dir, Dir)
+	if err := os.MkdirAll(changesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(changesDir, ConfigFile),
+		[]byte(`{"categories": ["api", "firmware"]}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	writeChange(t, dir, "ok.md", `---
+type: minor
+categories: [api]
+---
+Allowed category
+`)
+	if _, err := Read(dir); err != nil {
+		t.Fatalf("allowed category should pass, got: %v", err)
+	}
+
+	writeChange(t, dir, "bad.md", `---
+type: minor
+categories: [typo]
+---
+Unknown category
+`)
+	if _, err := Read(dir); err == nil {
+		t.Error("expected error for category outside the allowlist")
+	}
+}
+
+func TestRead_CategoryNoAllowlist(t *testing.T) {
+	dir := t.TempDir()
+	// No config.json: any category is accepted (pre-existing behavior).
+	writeChange(t, dir, "free.md", `---
+type: minor
+categories: [anything-goes]
+---
+Freeform category
+`)
+	if _, err := Read(dir); err != nil {
+		t.Fatalf("category should be accepted without an allowlist, got: %v", err)
+	}
+}

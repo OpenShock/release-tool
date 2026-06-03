@@ -9,12 +9,14 @@ inputs:
     description: >
       Release mode: 'stable' (consumes .changes, updates CHANGELOG),
       'beta' (prerelease, .changes since last beta or stable tag; use prerelease-label to set label e.g. rc, alpha, beta),
-      'develop' (prerelease, .changes since last develop/beta/stable tag, always tags with +sha).
+      'develop' (prerelease, .changes since last develop/beta/stable tag, always tags with +sha),
+      'status' (validate pending changes and print the next version; creates no tag).
     required: true
     options:
       - stable
       - beta
       - develop
+      - status
   dry-run:
     description: Preview without making changes (prints JSON to stdout, no tag created)
     required: false
@@ -97,6 +99,9 @@ runs:
               --prerelease-label "${PRERELEASE_LABEL:-develop}" \
               --git-sha \
               --allow-empty
+            ;;
+          status)
+            go run . --root "$WORKSPACE" status
             ;;
           *)
             echo "Unknown mode: $RELEASE_MODE" >&2
