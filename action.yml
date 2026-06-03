@@ -5,6 +5,9 @@ inputs:
   mode:
     description: Release mode — 'rc' or 'stable'
     required: true
+    options:
+      - rc
+      - stable
   dry-run:
     description: Preview without making changes (prints JSON to stdout, no tag created)
     required: false
@@ -52,13 +55,15 @@ runs:
       working-directory: ${{ github.action_path }}
       env:
         DRY_RUN: ${{ inputs.dry-run }}
+        RELEASE_MODE: ${{ inputs.mode }}
+        RELEASE_OUTPUT: ${{ inputs.output }}
       run: |
         ARGS=(
           --root        "${{ github.workspace }}"
-          --output      "${{ github.workspace }}/${{ inputs.output }}"
+          --output      "${{ github.workspace }}/$RELEASE_OUTPUT"
           --github-repo "${{ inputs.github-repo }}"
         )
         if [ "$DRY_RUN" = "true" ]; then
           ARGS+=(--dry-run)
         fi
-        go run . "${ARGS[@]}" ${{ inputs.mode }}
+        go run . "${ARGS[@]}" "$RELEASE_MODE"
