@@ -39,7 +39,12 @@ func runRC(_ *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	latest, err := git.LatestStableTag(root)
+	cfg, err := changes.ReadConfig(root)
+	if err != nil {
+		return err
+	}
+
+	latest, err := git.LatestStableTag(root, cfg.TagPrefix)
 	if err != nil {
 		return err
 	}
@@ -47,12 +52,12 @@ func runRC(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	num, err := git.LatestPrereleaseNumber(root, base, label)
+	num, err := git.LatestPrereleaseNumber(root, cfg.TagPrefix+base, label)
 	if err != nil {
 		return err
 	}
 
-	tag := fmt.Sprintf("%s-%s.%d", base, label, num+1)
+	tag := fmt.Sprintf("%s%s-%s.%d", cfg.TagPrefix, base, label, num+1)
 	if gitSHA {
 		sha, err := git.ShortSHA(root)
 		if err != nil {

@@ -1,6 +1,7 @@
 package changes
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,7 +15,27 @@ import (
 const (
 	Dir          = ".changes"
 	HeadlineFile = "_headline.md"
+	ConfigFile   = "config.json"
 )
+
+type Config struct {
+	TagPrefix string `json:"tag_prefix"`
+}
+
+func ReadConfig(root string) (*Config, error) {
+	data, err := os.ReadFile(filepath.Join(root, Dir, ConfigFile))
+	if os.IsNotExist(err) {
+		return &Config{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", ConfigFile, err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", ConfigFile, err)
+	}
+	return &cfg, nil
+}
 
 type Notice struct {
 	Level   string

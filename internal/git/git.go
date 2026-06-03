@@ -22,17 +22,16 @@ func run(root string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-var stableTagRe = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
-
-func LatestStableTag(root string) (string, error) {
+func LatestStableTag(root, prefix string) (string, error) {
+	re := regexp.MustCompile(`^` + regexp.QuoteMeta(prefix) + `(\d+\.\d+\.\d+)$`)
 	tags, err := run(root, "tag", "--sort=-v:refname")
 	if err != nil {
 		return "", err
 	}
 	for _, tag := range strings.Split(tags, "\n") {
 		tag = strings.TrimSpace(tag)
-		if stableTagRe.MatchString(tag) {
-			return tag, nil
+		if m := re.FindStringSubmatch(tag); m != nil {
+			return m[1], nil
 		}
 	}
 	return "", nil

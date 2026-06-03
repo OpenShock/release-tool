@@ -32,7 +32,12 @@ func runStatus(_ *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	latest, err := git.LatestStableTag(root)
+	cfg, err := changes.ReadConfig(root)
+	if err != nil {
+		return err
+	}
+
+	latest, err := git.LatestStableTag(root, cfg.TagPrefix)
 	if err != nil {
 		return err
 	}

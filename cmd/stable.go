@@ -35,7 +35,12 @@ func runStable(_ *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	latest, err := git.LatestStableTag(root)
+	cfg, err := changes.ReadConfig(root)
+	if err != nil {
+		return err
+	}
+
+	latest, err := git.LatestStableTag(root, cfg.TagPrefix)
 	if err != nil {
 		return err
 	}
@@ -44,14 +49,14 @@ func runStable(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	tag := base
+	tag := cfg.TagPrefix + base
 	isPrerelease := prereleaseLabel != ""
 	if isPrerelease {
-		num, err := git.LatestPrereleaseNumber(root, base, prereleaseLabel)
+		num, err := git.LatestPrereleaseNumber(root, cfg.TagPrefix+base, prereleaseLabel)
 		if err != nil {
 			return err
 		}
-		tag = fmt.Sprintf("%s-%s.%d", base, prereleaseLabel, num+1)
+		tag = fmt.Sprintf("%s%s-%s.%d", cfg.TagPrefix, base, prereleaseLabel, num+1)
 	}
 
 	commit, err := git.CurrentCommit(root)
