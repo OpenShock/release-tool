@@ -6,12 +6,15 @@ on:
       mode:
         description: Release mode
         required: true
-        default: alpha
+        default: prerelease
+        type: choice
         options:
           - stable
-          - rc
-          - alpha
-          - beta
+          - prerelease
+      label:
+        description: Prerelease label (e.g. alpha, beta, rc, nightly) — ignored for stable
+        required: false
+        default: alpha
 
 jobs:
   release:
@@ -24,23 +27,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Resolve prerelease label
-        id: cfg
-        shell: bash
-        run: |
-          case "${{ inputs.mode }}" in
-            stable) echo "label="    >> "$GITHUB_OUTPUT" ;;
-            rc)     echo "label=rc"    >> "$GITHUB_OUTPUT" ;;
-            alpha)  echo "label=alpha" >> "$GITHUB_OUTPUT" ;;
-            beta)   echo "label=beta"  >> "$GITHUB_OUTPUT" ;;
-          esac
-
       - name: Run release tool
         id: release
         uses: ./
         with:
-          mode: stable
-          prerelease-label: ${{ steps.cfg.outputs.label }}
+          mode: ${{ inputs.mode == 'stable' && 'stable' || 'rc' }}
+          prerelease-label: ${{ inputs.mode == 'stable' && '' || inputs.label }}
           notes-output: release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

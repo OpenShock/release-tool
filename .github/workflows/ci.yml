@@ -63,8 +63,5 @@ jobs:
       - name: Dry run stable
         run: go run . --dry-run stable
 
-      - name: Dry run alpha
-        run: go run . --dry-run --prerelease-label alpha stable
-
-      - name: Dry run rc
-        run: go run . --dry-run --prerelease-label rc stable
+      - name: Dry run prerelease
+        run: go run . --dry-run --prerelease-label alpha rc

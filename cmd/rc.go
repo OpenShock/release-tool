@@ -13,7 +13,7 @@ import (
 
 var rcCmd = &cobra.Command{
 	Use:   "rc",
-	Short: "Create or bump a prerelease tag, write release.json",
+	Short: "Create a prerelease tag from pending changes without consuming them",
 	RunE:  runRC,
 }
 
@@ -23,11 +23,6 @@ func init() {
 
 func runRC(_ *cobra.Command, _ []string) error {
 	root := projectRoot()
-
-	label := prereleaseLabel
-	if label == "" {
-		label = "rc"
-	}
 
 	ch, err := changes.Read(root)
 	if err != nil {
@@ -52,12 +47,15 @@ func runRC(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	num, err := git.LatestPrereleaseNumber(root, cfg.TagPrefix+base, label)
-	if err != nil {
-		return err
-	}
 
-	tag := fmt.Sprintf("%s%s-%s.%d", cfg.TagPrefix, base, label, num+1)
+	tag := cfg.TagPrefix + base
+	if prereleaseLabel != "" {
+		num, err := git.LatestPrereleaseNumber(root, cfg.TagPrefix+base, prereleaseLabel)
+		if err != nil {
+			return err
+		}
+		tag = fmt.Sprintf("%s%s-%s.%d", cfg.TagPrefix, base, prereleaseLabel, num+1)
+	}
 	if gitSHA {
 		sha, err := git.ShortSHA(root)
 		if err != nil {
