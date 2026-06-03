@@ -12,6 +12,7 @@ var (
 	output          string
 	notes           string
 	prereleaseLabel string
+	gitSHA          bool
 	rootDir         string
 )
 
@@ -32,6 +33,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&output, "output", "release.json", "Path to write release.json")
 	rootCmd.PersistentFlags().StringVar(&notes, "notes", "", "Path to write markdown release notes")
 	rootCmd.PersistentFlags().StringVar(&prereleaseLabel, "prerelease-label", "", "Override prerelease label (e.g. rc, alpha, beta)")
+	rootCmd.PersistentFlags().BoolVar(&gitSHA, "git-sha", false, "Append git short SHA as build metadata (+g<sha>)")
 	rootCmd.PersistentFlags().StringVar(&rootDir, "root", "", "Root directory of the target repo (defaults to cwd)")
 }
 

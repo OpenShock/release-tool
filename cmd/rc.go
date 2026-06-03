@@ -11,8 +11,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var gitSHA bool
-
 var rcCmd = &cobra.Command{
 	Use:   "rc",
 	Short: "Create or bump a prerelease tag, write release.json",
@@ -21,7 +19,6 @@ var rcCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(rcCmd)
-	rcCmd.Flags().BoolVar(&gitSHA, "git-sha", false, "Append git short SHA as build metadata (+g<sha>)")
 }
 
 func runRC(_ *cobra.Command, _ []string) error {
