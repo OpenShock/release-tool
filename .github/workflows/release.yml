@@ -1,68 +1,73 @@
-name: Release
-
 on:
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: Release mode
-        required: true
-        default: prerelease
-        type: choice
-        options:
-          - stable
-          - prerelease
-      label:
-        description: Prerelease label (e.g. alpha, beta, rc, nightly) — ignored for stable
-        required: false
-        default: alpha
+  push:
+    branches: [master]
+    paths-ignore:
+      - 'CHANGELOG.md'
+      - '.changes/**'
+
+name: release
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
 
 jobs:
   release:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    timeout-minutes: 15
+    if: github.actor != 'github-actions[bot]'
 
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Rebase on top of latest remote
+        run: git pull --rebase --autostash origin master
+
+      - name: Fetch all tags
+        run: git fetch --tags
 
       - name: Run release tool
-        id: release
+        id: meta
         uses: ./
         with:
-          mode: ${{ inputs.mode == 'stable' && 'stable' || 'beta' }}
-          prerelease-label: ${{ inputs.mode == 'stable' && '' || inputs.label }}
+          mode: release
           notes-output: release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push commit and tag
-        if: steps.release.outputs.skip != 'true'
-        run: |
-          git push origin HEAD:${{ github.ref_name }}
-          git push origin ${{ steps.release.outputs.tag }}
+        if: steps.meta.outputs.tag != ''
+        run: git push origin HEAD "${{ steps.meta.outputs.tag }}"
 
       - name: Build release binaries
-        if: steps.release.outputs.skip != 'true'
+        if: steps.meta.outputs.tag != ''
         run: |
           mkdir -p dist
-          declare -A exts=([windows]=".exe")
           for platform in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
             GOOS="${platform%/*}" GOARCH="${platform#*/}"
-            out="dist/release-tool-${GOOS}-${GOARCH}${exts[$GOOS]}"
-            GOOS=$GOOS GOARCH=$GOARCH go build -ldflags "-s -w" -o "$out" .
+            EXT=""
+            [ "$GOOS" = "windows" ] && EXT=".exe"
+            GOOS=$GOOS GOARCH=$GOARCH go build -ldflags "-s -w" -o "dist/release-tool-${GOOS}-${GOARCH}${EXT}" .
           done
 
       - name: Create GitHub release
-        if: steps.release.outputs.skip != 'true'
+        if: steps.meta.outputs.tag != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
         run: |
-          PRERELEASE_FLAG=""
-          [ "${{ steps.release.outputs.prerelease }}" = "true" ] && PRERELEASE_FLAG="--prerelease"
-          gh release create "${{ steps.release.outputs.tag }}" \
-            --title "${{ steps.release.outputs.tag }}" \
-            --notes-file release-notes.md \
-            $PRERELEASE_FLAG \
-            dist/*
+          ARGS=("$TAG" --title "$TAG" --notes-file release-notes.md dist/*)
+          [ "$PRERELEASE" = "true" ] && ARGS+=(--prerelease)
+          gh release create "${ARGS[@]}"

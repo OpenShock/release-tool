@@ -1,3 +1,7 @@
 {
-  "tag_prefix": "v"
+  "tag_prefix": "v",
+  "categories": ["cli", "ci"],
+  "branches": {
+    "master": { "release": "stable" }
+  }
 }

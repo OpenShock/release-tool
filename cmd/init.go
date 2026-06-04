@@ -64,28 +64,32 @@ Run ` + "`" + `release-tool new "<title>" --type minor` + "`" + ` to generate on
 - ` + "`" + `_headline.md` + "`" + ` - optional release headline shown at the top of the changelog entry
 `
 
+func writeIfMissing(path, content string) error {
+	if _, err := os.Stat(path); err == nil {
+		fmt.Fprintf(os.Stderr, "Skipping %s (already exists)\n", path)
+		return nil
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	fmt.Fprintf(os.Stderr, "Created %s\n", path)
+	return nil
+}
+
 func runInit(_ *cobra.Command, _ []string) error {
 	root := projectRoot()
 	dir := filepath.Join(root, changes.Dir)
-
-	if _, err := os.Stat(dir); err == nil {
-		return fmt.Errorf("%s already exists", changes.Dir)
-	}
 
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("creating %s: %w", changes.Dir, err)
 	}
 
-	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte(changesReadme), 0644); err != nil {
-		return fmt.Errorf("writing README: %w", err)
+	if err := writeIfMissing(filepath.Join(dir, "README.md"), changesReadme); err != nil {
+		return err
 	}
-
-	configJSON := buildConfigJSON(initBranches)
-	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(configJSON), 0644); err != nil {
-		return fmt.Errorf("writing config.json: %w", err)
+	if err := writeIfMissing(filepath.Join(dir, "config.json"), buildConfigJSON(initBranches)); err != nil {
+		return err
 	}
-
-	fmt.Fprintf(os.Stderr, "Initialised %s/\n", changes.Dir)
 
 	if !initNoWorkflows {
 		if err := writeWorkflows(root, initActionRef, initBranches); err != nil {
@@ -237,24 +241,12 @@ jobs:
           fi
 `
 
-	checkPath := filepath.Join(wfDir, "check-changes.yml")
-	commentPath := filepath.Join(wfDir, "pr-check-comment.yml")
-
-	for _, f := range []string{checkPath, commentPath} {
-		if _, err := os.Stat(f); err == nil {
-			return fmt.Errorf("%s already exists", f)
-		}
+	if err := writeIfMissing(filepath.Join(wfDir, "check-changes.yml"), checkYML); err != nil {
+		return err
 	}
-
-	if err := os.WriteFile(checkPath, []byte(checkYML), 0644); err != nil {
-		return fmt.Errorf("writing check-changes.yml: %w", err)
+	if err := writeIfMissing(filepath.Join(wfDir, "pr-check-comment.yml"), commentYML); err != nil {
+		return err
 	}
-	fmt.Fprintf(os.Stderr, "Created .github/workflows/check-changes.yml\n")
-
-	if err := os.WriteFile(commentPath, []byte(commentYML), 0644); err != nil {
-		return fmt.Errorf("writing pr-check-comment.yml: %w", err)
-	}
-	fmt.Fprintf(os.Stderr, "Created .github/workflows/pr-check-comment.yml\n")
 
 	return nil
 }
