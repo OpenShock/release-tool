@@ -1,6 +1,6 @@
 # release-tool
 
-`release-tool` manages releases from change files in `.changes/`. It computes the next semver, writes `release.json`, can generate markdown release notes, and creates the corresponding git tag.
+`release-tool` automates semver releases driven by change files in `.changes/`. It reads per-branch config to decide whether a push should produce a stable release, a prerelease tag, or a no-tag build artifact — all from one `release` command that CI calls the same way on every branch.
 
 ## Install
 
@@ -8,41 +8,17 @@
 
 Pick the binary for your platform from [GitHub Releases](https://github.com/OpenShock/release-tool/releases).
 
-Common installs:
-
-#### Linux x86_64
-
 ```sh
+# Linux x86_64
 curl -Lo /usr/local/bin/release-tool \
   https://github.com/OpenShock/release-tool/releases/latest/download/release-tool-linux-amd64
 chmod +x /usr/local/bin/release-tool
-```
 
-#### macOS Apple Silicon
-
-```sh
+# macOS Apple Silicon
 curl -Lo /usr/local/bin/release-tool \
   https://github.com/OpenShock/release-tool/releases/latest/download/release-tool-darwin-arm64
 chmod +x /usr/local/bin/release-tool
 ```
-
-#### macOS Intel
-
-```sh
-curl -Lo /usr/local/bin/release-tool \
-  https://github.com/OpenShock/release-tool/releases/latest/download/release-tool-darwin-amd64
-chmod +x /usr/local/bin/release-tool
-```
-
-#### Windows PowerShell
-
-```powershell
-Invoke-WebRequest `
-  -Uri https://github.com/OpenShock/release-tool/releases/latest/download/release-tool-windows-amd64.exe `
-  -OutFile $env:USERPROFILE\bin\release-tool.exe
-```
-
-If you use a different architecture, download the matching asset from Releases.
 
 ### Alternative: install with Go
 
@@ -50,194 +26,356 @@ If you use a different architecture, download the matching asset from Releases.
 go install github.com/OpenShock/release-tool@latest
 ```
 
-If `release-tool` is not found afterwards, add your Go bin directory to `PATH`:
+## Quick start
 
 ```sh
-export PATH="$(go env GOPATH)/bin:$PATH"
-```
+# Bootstrap a new repo (creates .changes/ and .github/workflows/)
+release-tool init --branches master,beta --develop develop \
+  --action-ref "OpenShock/release-tool@v1.0.0" --tag-prefix v
 
-### Check it works
+# Create a change file for work you're about to commit
+release-tool new "Add user authentication" --type minor --categories api
 
-```sh
-release-tool --help
-```
-
-## Workflow
-
-1. Initialise a repo once:
-
-```sh
-release-tool init
-```
-
-2. Add change files as work lands:
-
-```sh
-release-tool new
-```
-
-Or non-interactively:
-
-```sh
-release-tool new "Add support for X" --type minor --categories api,cli
-```
-
-3. Inspect pending changes:
-
-```sh
+# Check pending changes and next version
 release-tool status
+
+# Manually cut a release (CI handles this automatically)
+release-tool release
 ```
 
-4. Cut a release:
+## How it works
 
-```sh
-release-tool stable
+Everything is driven by `.changes/config.json`:
+
+```json
+{
+  "tag_prefix": "v",
+  "categories": ["api", "frontend", "ci"],
+  "branches": {
+    "master":  { "release": "stable" },
+    "beta":    { "release": "prerelease", "label": "beta" },
+    "develop": { "release": "none", "label": "develop", "sha": true }
+  }
+}
 ```
 
-`stable`:
-- Computes the next version from pending `.changes/*.md`
-- Writes `release.json`
-- Optionally writes markdown notes via `--notes`
-- Prepends a new entry to `CHANGELOG.md`
-- Removes consumed change files
-- Commits the changelog/update and creates a stable tag
+When a push lands on a configured branch, `release-tool release` reads the branch config and:
 
-For prereleases, use:
+| `release` value | Behaviour |
+|---|---|
+| `stable` | Computes next semver, writes `CHANGELOG.md`, removes change files, commits, creates tag |
+| `prerelease` | Computes next semver + label (e.g. `1.2.0-beta.3`), writes release data, creates tag — change files stay |
+| `none` | Computes version with SHA metadata (e.g. `1.2.0-develop+gabc123`), writes release data — **no git tag, no changelog** |
 
-```sh
-release-tool --prerelease-label beta rc
-release-tool --prerelease-label develop --git-sha rc --allow-empty
+If there are no change files since the last stable tag, the tool exits with `skip=true` and does nothing.
+
+## Branch model
+
+```
+feature/* → develop  (none:  release.json + SHA version, no tag)
+develop   → beta     (prerelease: release.json + beta.N tag)
+beta      → master   (stable: release.json + vX.Y.Z tag + CHANGELOG.md)
 ```
 
-`rc` does **not** consume `.changes/` files or update `CHANGELOG.md`; it only writes release data and creates a prerelease tag.
+Change files are never consumed by prerelease or none branches. Only a stable release removes them. This means:
+- A develop build always reflects all unreleased changes
+- After a stable release, develop sees only changes added since that tag (git history-based, not filesystem-based)
+
+## Setting up CI
+
+### Automated releases
+
+Add a `release.yml` workflow that triggers on push to your release branches:
+
+```yaml
+on:
+  push:
+    branches: [master, beta, develop]
+    paths-ignore:
+      - 'CHANGELOG.md'
+      - '.changes/**'
+
+name: release
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      - uses: actions/checkout@<sha> # v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}   # PAT required — see below
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Rebase on top of latest remote
+        run: git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+
+      - name: Fetch all tags
+        run: git fetch --tags
+
+      - uses: OpenShock/release-tool@v1
+        id: meta
+        with:
+          mode: release
+          notes-output: release-notes.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Push commit and tag
+        if: steps.meta.outputs.tag != ''
+        run: git push origin HEAD "${{ steps.meta.outputs.tag }}"
+
+      - name: Create GitHub release
+        if: steps.meta.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          ARGS=("${{ steps.meta.outputs.tag }}" release.json --title "${{ steps.meta.outputs.tag }}" --notes-file release-notes.md)
+          [ "${{ steps.meta.outputs.prerelease }}" = "true" ] && ARGS+=(--prerelease)
+          gh release create "${ARGS[@]}"
+```
+
+> **`RELEASE_TOKEN`** must be a Personal Access Token (PAT) with `repo` scope. The default `GITHUB_TOKEN` cannot push tags in a way that triggers other workflows (e.g. `ci-build`). Create the PAT, add it as a repository secret named `RELEASE_TOKEN`.
+
+### PR change-file check
+
+Run `release-tool init` to generate both workflow files automatically, or add them manually:
+
+**`.github/workflows/check-changes.yml`** — runs on `pull_request` with read-only permissions (fork-safe):
+
+```yaml
+on:
+  pull_request:
+    branches: [master, beta, develop]
+    types: [opened, reopened, synchronize, ready_for_review, labeled, unlabeled]
+
+name: check-changes
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: >-
+      !github.event.pull_request.draft &&
+      !contains(github.event.pull_request.labels.*.name, 'no-changelog')
+    steps:
+      - uses: actions/checkout@<sha> # v6
+        with:
+          fetch-depth: 0
+
+      - uses: OpenShock/release-tool@v1
+        with:
+          mode: check
+          base-ref: ${{ github.event.pull_request.base.ref }}
+          base-sha: ${{ github.event.pull_request.base.sha }}
+          pr-number: ${{ github.event.pull_request.number }}
+
+      - uses: actions/upload-artifact@<sha> # v7
+        if: always()
+        with:
+          name: release-check
+          path: release-check.json
+          if-no-files-found: warn
+```
+
+**`.github/workflows/pr-check-comment.yml`** — runs on `workflow_run` with write permissions, never executes fork code:
+
+```yaml
+on:
+  workflow_run:
+    workflows: [check-changes]
+    types: [completed]
+
+name: pr-check-comment
+
+permissions:
+  pull-requests: write
+
+jobs:
+  comment:
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.event == 'pull_request'
+    steps:
+      - name: Download verdict
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@<sha> # v8
+        with:
+          name: release-check
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Post, update, or remove sticky comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          DOWNLOAD_OK: ${{ steps.download.outcome == 'success' }}
+          FALLBACK_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          if [ "$DOWNLOAD_OK" = "true" ]; then
+            STATE=$(jq -r '.state' release-check.json)
+            PR=$(jq -r '.pr' release-check.json)
+            BODY=$(jq -r '.body' release-check.json)
+          else
+            STATE="skip"; PR="$FALLBACK_PR"; BODY=""
+          fi
+          [ -z "$PR" ] || [ "$PR" = "0" ] || [ "$PR" = "null" ] && exit 0
+          EXISTING=$(gh api "repos/$GH_REPO/issues/$PR/comments" \
+            --jq '[.[] | select(.body | contains("<!-- release-tool-check -->"))] | first | .id // empty')
+          if [ "$STATE" = "skip" ]; then
+            [ -n "$EXISTING" ] && gh api --method DELETE "repos/$GH_REPO/issues/comments/$EXISTING"
+          elif [ -n "$EXISTING" ]; then
+            gh api --method PATCH "repos/$GH_REPO/issues/comments/$EXISTING" --field body="$BODY"
+          else
+            gh api --method POST "repos/$GH_REPO/issues/$PR/comments" --field body="$BODY"
+          fi
+```
+
+The two-stage split is the key security property: fork code runs in stage 1 (read-only token, no secrets), the write token only touches stage 2 (base branch code only, no fork code).
+
+Add the `no-changelog` label to a PR to skip the check for intentional non-release changes (dependency bumps, CI tweaks, docs).
 
 ## Change file format
 
 ```markdown
 ---
-type: minor          # major | minor | patch
-breaking: false      # optional; major defaults to true
-categories: [api]    # optional
-pr: 123              # optional; see below
+type: minor          # major | minor | patch  (required)
+breaking: false      # optional; defaults to true when type is major
+categories: [api]    # optional; validated against allowlist if set in config.json
 ---
-Title shown in changelog
+Title shown in changelog (required, first line)
 
-Optional extended body shown in the changelog.
+Optional extended body shown in the changelog entry.
 
 ## Release Note
-Plain-language note for end users. Included in `release.json`, not in `CHANGELOG.md`.
+Plain-language note for end users. Included in release.json, not in CHANGELOG.md.
 
 ## Notices
 - warning: something users must know before upgrading
-- info: optional migration or rollout note
+- info: optional migration step
+- error: something that will break
 ```
 
-`pr` is tri-state:
-- **absent**: the PR number is derived from git history (the PR that introduced the file)
-- **integer** (`pr: 123`): used verbatim, no derivation
-- **`pr: null`**: suppresses the PR link entirely
+**`pr` field** — do not set this in a PR. It is assigned automatically at release time from git history. Setting it (to a number or `null`) will cause the PR check to fail.
 
-Notice levels must be one of `info`, `warning`, or `error`, and each line must be
-`- level: message`. Invalid levels or malformed lines fail validation (caught by `status`).
+At release time, `pr` is tri-state:
+- **absent**: derived from git log
+- **integer** (`pr: 123`): used verbatim
+- **`pr: null`**: PR link suppressed
 
-Special files in `.changes/`:
-- `README.md`: local format reference created by `release-tool init`
-- `_headline.md`: optional markdown shown at the top of the generated changelog entry
-- `config.json`: optional repo config
+Notice levels must be `info`, `warning`, or `error`.
 
-Example `.changes/config.json`:
+## CLI reference
 
-```json
-{
-  "tag_prefix": "v",
-  "categories": ["api", "firmware", "frontend"]
-}
+```
+release-tool [command]
+
+Commands:
+  init        Bootstrap .changes/ and GitHub Actions workflows
+  new         Create a change file interactively or from flags
+  status      Show pending changes and next version (no side effects)
+  release     Run stable/prerelease/none based on branch config (used by CI)
+  prerelease  Create a prerelease tag directly (manual override)
+  check       Validate change files added by a PR, write verdict JSON
 ```
 
-`categories`, when present, is an allowlist: change files declaring a category
-outside the list fail validation. When omitted, any category string is accepted.
+### `init`
 
-## Contributors & PR enrichment
+```sh
+release-tool init \
+  --branches master,beta \       # stable first, then prerelease
+  --develop develop \            # release:none + sha:true branches
+  --categories api,ci,frontend \ # allowlist (empty = any)
+  --tag-prefix v \
+  --action-ref "OpenShock/release-tool@<sha>" \
+  --no-workflows                 # skip .github/workflows/ generation
+```
 
-When the `gh` CLI is available and authenticated (`GH_TOKEN`), `stable` and `rc`
-enrich the release with GitHub data:
+Idempotent — skips files that already exist.
 
-- **PR numbers** are derived for change files that don't pin one (see `pr` above).
-- **Contributors** — every commit author since the previous tag is recorded in
-  `release.json` (`contributors`), and the generated notes gain a `### Contributors`
-  footer thanking them, excluding repo maintainers (admin/maintain collaborators)
-  and `*[bot]` accounts.
+### `new`
 
-Both require the checkout to include tags and history (`fetch-depth: 0`) so the
-previous tag is a resolvable ref. Maintainer detection needs a token with push
-access; without it, the footer simply thanks everyone. Enrichment is skipped
-under `--dry-run`.
+```sh
+release-tool new "Fix crash on boot" --type patch --categories firmware
+```
 
-## Common flags
+Interactive if title is omitted.
 
-Global flags available to `stable`, `rc`, `status`, `init`, and `new`:
+### `status`
 
-- `--dry-run`: preview without writing files, committing, or tagging
-- `--output <path>`: where to write `release.json` (default `release.json`)
-- `--notes <path>`: write markdown release notes
-- `--prerelease-label <label>`: prerelease label such as `alpha`, `beta`, `rc`, or `develop`
-- `--git-sha`: append `+g<sha>` build metadata to prerelease tags
-- `--root <path>`: operate on another repository root
+```sh
+release-tool status
+```
 
-## GitHub Action
+Prints pending change files and the next version that would be created. No files written, no tags created.
 
-The composite action wraps the CLI and exposes five modes:
+### `release`
+
+```sh
+release-tool release [--dry-run] [--output release.json] [--notes release-notes.md]
+```
+
+Reads the current branch from config and dispatches:
+- `stable` → consume changes, write changelog, create tag
+- `prerelease` → create tag, leave change files
+- `none` → write release data only, no tag
+
+### `prerelease`
+
+```sh
+release-tool prerelease [--prerelease-label rc] [--git-sha] [--dry-run]
+```
+
+Direct prerelease invocation for manual use. Reads the current branch for context but overrides label/sha from flags. Always creates a tag (unlike `release` on a `none` branch).
+
+### `check`
+
+```sh
+release-tool check --base master --against <base-sha> --pr <pr-number> --out release-check.json
+```
+
+Writes a verdict JSON used by the PR comment stage. Exit code is non-zero on `invalid`.
+
+## Action reference
 
 ```yaml
 - uses: OpenShock/release-tool@v1
   with:
-    mode: stable               # stable | beta | develop | status | check
-    dry-run: false
+    mode: release   # release | status | check
+    # release mode:
     output: release.json
     notes-output: release-notes.md
-    prerelease-label: beta     # optional override for beta/develop
-    git-sha: false             # append +g<sha> to prerelease tags
+    dry-run: false
+    # check mode:
+    base-ref: ${{ github.event.pull_request.base.ref }}
+    base-sha: ${{ github.event.pull_request.base.sha }}
+    pr-number: ${{ github.event.pull_request.number }}
+    # advanced:
+    go-version: '1.25'
 ```
 
-Mode behavior:
-- `stable`: consumes pending change files and updates `CHANGELOG.md`
-- `beta`: creates prerelease tags from changes since the last beta or stable tag
-- `develop`: creates prerelease tags from changes since the last develop, beta, or stable tag, always with git SHA metadata and allowing empty cuts
-- `status`: validates pending changes and prints the next version without creating a tag (useful as a push-time check)
-- `check`: validates the change files a pull request adds and writes `release-check.json` (see below)
+Outputs: `tag`, `prerelease`, `skip`.
 
-Action outputs:
-- `tag`: created tag, empty when skipped
-- `prerelease`: `true` for prerelease tags
-- `skip`: `true` when no release was created
+## Contributors & PR enrichment
 
-## Pull request change-file check
+When `GITHUB_TOKEN` is set with sufficient permissions, the tool enriches releases with GitHub data:
 
-`mode: check` evaluates the change files a pull request adds relative to its base
-branch and writes a verdict (`ok`, `missing`, `invalid`, or `skip`) to
-`release-check.json`. The job exits non-zero on `invalid`, so it works as a merge
-gate. The base branch is resolved through the `branches` map in
-`.changes/config.json`, which is the single source of truth for which branches
-are release branches:
+- **PR numbers** are derived for change files that don't pin one
+- **Contributors** — commit authors since the previous tag are listed in `release.json` and in a `### Contributors` section in the release notes, excluding maintainers (admin/maintain collaborators) and bot accounts
 
-```json
-{
-  "branches": { "master": "stable", "beta": "beta", "develop": "develop" }
-}
-```
-
-A pull request whose base is not listed yields `skip` (no gate, no comment).
-
-To post the verdict as a sticky comment without exposing a write token to
-untrusted fork code, use a two-stage setup:
-
-1. A `pull_request` workflow (`permissions: contents: read`, no secrets) runs
-   `mode: check` and uploads `release-check.json` as an artifact. Its exit code is
-   the gate, so it works for fork pull requests.
-2. A `workflow_run` workflow (`permissions: pull-requests: write`) triggers on the
-   first one's completion, downloads the artifact, and posts the comment. It never
-   checks out or runs pull request code, so the write token never meets untrusted
-   input.
-
-See `.github/workflows/pr-check.yml` and `pr-check-comment.yml` in the
-`cicd-playground` repo for a working example.
+Both require `fetch-depth: 0` so the previous tag is reachable. Enrichment is skipped under `--dry-run`.

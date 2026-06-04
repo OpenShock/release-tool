@@ -22,46 +22,42 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Post or update sticky comment
-        if: steps.download.outcome == 'success'
+      - name: Post, update, or remove sticky comment
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          DOWNLOAD_OK: ${{ steps.download.outcome == 'success' }}
+          FALLBACK_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
         run: |
-          STATE=$(jq -r '.state' release-check.json)
-          PR=$(jq -r '.pr' release-check.json)
-          BODY=$(jq -r '.body' release-check.json)
+          # Determine PR number and verdict state
+          if [ "$DOWNLOAD_OK" = "true" ]; then
+            STATE=$(jq -r '.state' release-check.json)
+            PR=$(jq -r '.pr' release-check.json)
+            BODY=$(jq -r '.body' release-check.json)
+          else
+            STATE="skip"
+            PR="$FALLBACK_PR"
+            BODY=""
+          fi
 
-          if [ "$STATE" = "skip" ] || [ "$PR" = "0" ] || [ -z "$PR" ] || [ "$PR" = "null" ]; then
-            echo "No comment to post (state=$STATE pr=$PR)"
+          if [ -z "$PR" ] || [ "$PR" = "0" ] || [ "$PR" = "null" ]; then
+            echo "No PR number, nothing to do"
             exit 0
           fi
 
           EXISTING=$(gh api "repos/$GH_REPO/issues/$PR/comments" \
             --jq '[.[] | select(.body | contains("<!-- release-tool-check -->"))] | first | .id // empty')
 
-          if [ -n "$EXISTING" ]; then
+          if [ "$STATE" = "skip" ]; then
+            # Base branch not a release branch (or check was skipped via label) — remove stale comment
+            if [ -n "$EXISTING" ]; then
+              gh api --method DELETE "repos/$GH_REPO/issues/comments/$EXISTING"
+              echo "Deleted stale comment $EXISTING on PR #$PR"
+            fi
+          elif [ -n "$EXISTING" ]; then
             gh api --method PATCH "repos/$GH_REPO/issues/comments/$EXISTING" \
               --field body="$BODY"
           else
             gh api --method POST "repos/$GH_REPO/issues/$PR/comments" \
               --field body="$BODY"
-          fi
-
-      - name: Remove stale comment when check was skipped
-        if: steps.download.outcome != 'success'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          PR: ${{ github.event.workflow_run.pull_requests[0].number }}
-        run: |
-          if [ -z "$PR" ] || [ "$PR" = "null" ]; then
-            echo "No PR number available, skipping"
-            exit 0
-          fi
-          EXISTING=$(gh api "repos/$GH_REPO/issues/$PR/comments" \
-            --jq '[.[] | select(.body | contains("<!-- release-tool-check -->"))] | first | .id // empty')
-          if [ -n "$EXISTING" ]; then
-            gh api --method DELETE "repos/$GH_REPO/issues/comments/$EXISTING"
-            echo "Deleted stale release-tool comment $EXISTING on PR #$PR"
           fi

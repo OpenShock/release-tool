@@ -13,6 +13,9 @@ import (
 var (
 	initActionRef   string
 	initBranches    []string
+	initDevelop     []string
+	initCategories  []string
+	initTagPrefix   string
 	initNoWorkflows bool
 )
 
@@ -25,7 +28,10 @@ var initCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(initCmd)
 	initCmd.Flags().StringVar(&initActionRef, "action-ref", "OpenShock/release-tool@main", "Action ref to use in generated workflows (pin to a SHA for production)")
-	initCmd.Flags().StringSliceVar(&initBranches, "branches", []string{"master"}, "Release branches for check-changes workflow trigger")
+	initCmd.Flags().StringSliceVar(&initBranches, "branches", []string{"master"}, "Release branches (stable first, then prerelease)")
+	initCmd.Flags().StringSliceVar(&initDevelop, "develop", nil, "Branches that build without tagging (release:none, sha:true)")
+	initCmd.Flags().StringSliceVar(&initCategories, "categories", nil, "Change file category allowlist (empty = any category allowed)")
+	initCmd.Flags().StringVar(&initTagPrefix, "tag-prefix", "", "Tag prefix (e.g. 'v')")
 	initCmd.Flags().BoolVar(&initNoWorkflows, "no-workflows", false, "Skip creating .github/workflows/ files")
 }
 
@@ -87,12 +93,13 @@ func runInit(_ *cobra.Command, _ []string) error {
 	if err := writeIfMissing(filepath.Join(dir, "README.md"), changesReadme); err != nil {
 		return err
 	}
-	if err := writeIfMissing(filepath.Join(dir, "config.json"), buildConfigJSON(initBranches)); err != nil {
+	if err := writeIfMissing(filepath.Join(dir, "config.json"), buildConfigJSON(initTagPrefix, initCategories, initBranches, initDevelop)); err != nil {
 		return err
 	}
 
 	if !initNoWorkflows {
-		if err := writeWorkflows(root, initActionRef, initBranches); err != nil {
+		allBranches := append(initBranches, initDevelop...)
+		if err := writeWorkflows(root, initActionRef, allBranches); err != nil {
 			return err
 		}
 	}
@@ -100,7 +107,7 @@ func runInit(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-func buildConfigJSON(branches []string) string {
+func buildConfigJSON(tagPrefix string, categories, branches, develop []string) string {
 	var branchEntries []string
 	for i, b := range branches {
 		var entry string
@@ -111,14 +118,28 @@ func buildConfigJSON(branches []string) string {
 		}
 		branchEntries = append(branchEntries, entry)
 	}
+	for _, b := range develop {
+		entry := fmt.Sprintf(`    %q: { "release": "none", "label": %q, "sha": true }`, b, b)
+		branchEntries = append(branchEntries, entry)
+	}
+
+	cats := "[]"
+	if len(categories) > 0 {
+		quoted := make([]string, len(categories))
+		for i, c := range categories {
+			quoted[i] = fmt.Sprintf("%q", c)
+		}
+		cats = "[" + strings.Join(quoted, ", ") + "]"
+	}
+
 	return fmt.Sprintf(`{
-  "tag_prefix": "",
-  "categories": [],
+  "tag_prefix": %q,
+  "categories": %s,
   "branches": {
 %s
   }
 }
-`, strings.Join(branchEntries, ",\n"))
+`, tagPrefix, cats, strings.Join(branchEntries, ",\n"))
 }
 
 func writeWorkflows(root, actionRef string, branches []string) error {
@@ -198,48 +219,42 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Post or update sticky comment
-        if: steps.download.outcome == 'success'
+      - name: Post, update, or remove sticky comment
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          DOWNLOAD_OK: ${{ steps.download.outcome == 'success' }}
+          FALLBACK_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
         run: |
-          STATE=$(jq -r '.state' release-check.json)
-          PR=$(jq -r '.pr' release-check.json)
-          BODY=$(jq -r '.body' release-check.json)
+          if [ "$DOWNLOAD_OK" = "true" ]; then
+            STATE=$(jq -r '.state' release-check.json)
+            PR=$(jq -r '.pr' release-check.json)
+            BODY=$(jq -r '.body' release-check.json)
+          else
+            STATE="skip"
+            PR="$FALLBACK_PR"
+            BODY=""
+          fi
 
-          if [ "$STATE" = "skip" ] || [ "$PR" = "0" ] || [ -z "$PR" ] || [ "$PR" = "null" ]; then
-            echo "No comment to post (state=$STATE pr=$PR)"
+          if [ -z "$PR" ] || [ "$PR" = "0" ] || [ "$PR" = "null" ]; then
+            echo "No PR number, nothing to do"
             exit 0
           fi
 
           EXISTING=$(gh api "repos/$GH_REPO/issues/$PR/comments" \
             --jq '[.[] | select(.body | contains("<!-- release-tool-check -->"))] | first | .id // empty')
 
-          if [ -n "$EXISTING" ]; then
+          if [ "$STATE" = "skip" ]; then
+            if [ -n "$EXISTING" ]; then
+              gh api --method DELETE "repos/$GH_REPO/issues/comments/$EXISTING"
+              echo "Deleted stale comment $EXISTING on PR #$PR"
+            fi
+          elif [ -n "$EXISTING" ]; then
             gh api --method PATCH "repos/$GH_REPO/issues/comments/$EXISTING" \
               --field body="$BODY"
           else
             gh api --method POST "repos/$GH_REPO/issues/$PR/comments" \
               --field body="$BODY"
-          fi
-
-      - name: Remove stale comment when check was skipped
-        if: steps.download.outcome != 'success'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          PR: ${{ github.event.workflow_run.pull_requests[0].number }}
-        run: |
-          if [ -z "$PR" ] || [ "$PR" = "null" ]; then
-            echo "No PR number available, skipping"
-            exit 0
-          fi
-          EXISTING=$(gh api "repos/$GH_REPO/issues/$PR/comments" \
-            --jq '[.[] | select(.body | contains("<!-- release-tool-check -->"))] | first | .id // empty')
-          if [ -n "$EXISTING" ]; then
-            gh api --method DELETE "repos/$GH_REPO/issues/comments/$EXISTING"
-            echo "Deleted stale release-tool comment $EXISTING on PR #$PR"
           fi
 `
 
