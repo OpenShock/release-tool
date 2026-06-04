@@ -1,6 +1,6 @@
 on:
   push:
-    branches: [master]
+    branches: [master, alpha]
     paths-ignore:
       - 'CHANGELOG.md'
       - '.changes/**'
@@ -32,7 +32,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Rebase on top of latest remote
-        run: git pull --rebase --autostash origin master
+        run: git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
 
       - name: Fetch all tags
         run: git fetch --tags

@@ -1,6 +1,6 @@
 on:
   pull_request:
-    branches: [master]
+    branches: [master, alpha]
     types: [opened, reopened, synchronize, labeled, unlabeled]
 
 name: check-changes
