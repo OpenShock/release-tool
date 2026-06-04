@@ -23,16 +23,21 @@ type NoticeEntry struct {
 	Message string `json:"message"`
 }
 
+type ReleaseNoteEntry struct {
+	Title MDText  `json:"title"`
+	Body  *MDText `json:"body,omitempty"`
+}
+
 type ChangeEntry struct {
-	ID          string        `json:"id"`
-	Type        string        `json:"type"`
-	Breaking    bool          `json:"breaking"`
-	Categories  []string      `json:"categories"`
-	Title       MDText        `json:"title"`
-	Body        *MDText       `json:"body,omitempty"`
-	ReleaseNote *MDText       `json:"release_note,omitempty"`
-	PR          *int          `json:"pr,omitempty"`
-	Notices     []NoticeEntry `json:"notices"`
+	ID          string             `json:"id"`
+	Type        string             `json:"type"`
+	Breaking    bool               `json:"breaking"`
+	Categories  []string           `json:"categories"`
+	Title       MDText             `json:"title"`
+	Body        *MDText            `json:"body,omitempty"`
+	ReleaseNote *ReleaseNoteEntry  `json:"release_note,omitempty"`
+	PR          *int               `json:"pr,omitempty"`
+	Notices     []NoticeEntry      `json:"notices"`
 }
 
 type ReleaseData struct {
@@ -69,6 +74,20 @@ func mdText(text string) *MDText {
 	return &MDText{Format: "markdown", Text: text}
 }
 
+func releaseNote(text string) *ReleaseNoteEntry {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	title, body, _ := strings.Cut(text, "\n")
+	body = strings.TrimSpace(body)
+	entry := &ReleaseNoteEntry{Title: MDText{Format: "markdown", Text: strings.TrimSpace(title)}}
+	if body != "" {
+		entry.Body = &MDText{Format: "markdown", Text: body}
+	}
+	return entry
+}
+
 func BuildData(p BuildParams) *ReleaseData {
 	data := &ReleaseData{
 		SchemaVersion: schemaVersion,
@@ -92,7 +111,7 @@ func BuildData(p BuildParams) *ReleaseData {
 			Categories:  c.Categories,
 			Title:       MDText{Format: "markdown", Text: c.Title},
 			Body:        mdText(c.Body),
-			ReleaseNote: mdText(c.ReleaseNote),
+			ReleaseNote: releaseNote(c.ReleaseNote),
 			Notices:     make([]NoticeEntry, len(c.Notices)),
 		}
 		for i, n := range c.Notices {

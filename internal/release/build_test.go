@@ -90,8 +90,11 @@ func TestBuildData_Changes(t *testing.T) {
 	if e.Body == nil || e.Body.Text != "body text" {
 		t.Errorf("Body: got %v", e.Body)
 	}
-	if e.ReleaseNote == nil || e.ReleaseNote.Text != "release note text" {
-		t.Errorf("ReleaseNote: got %v", e.ReleaseNote)
+	if e.ReleaseNote == nil || e.ReleaseNote.Title.Text != "release note text" {
+		t.Errorf("ReleaseNote.Title: got %v", e.ReleaseNote)
+	}
+	if e.ReleaseNote.Body != nil {
+		t.Errorf("ReleaseNote.Body should be nil for single-line note, got %v", e.ReleaseNote.Body)
 	}
 	if len(e.Notices) != 1 || e.Notices[0].Level != "warning" {
 		t.Errorf("Notices: got %v", e.Notices)

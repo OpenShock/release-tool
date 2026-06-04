@@ -116,7 +116,7 @@ func TestRenderChangelog_PRLink(t *testing.T) {
 	}
 }
 
-func TestRenderChangelog_BodyIndented(t *testing.T) {
+func TestRenderChangelog_BodyNotInChangelog(t *testing.T) {
 	body := "Line one\nLine two"
 	d := &ReleaseData{
 		Tag: "1.1.0",
@@ -125,8 +125,11 @@ func TestRenderChangelog_BodyIndented(t *testing.T) {
 		},
 	}
 	entry := RenderChangelog(d, "", nil)
-	if !strings.Contains(entry, "  Line one") || !strings.Contains(entry, "  Line two") {
-		t.Errorf("expected indented body lines in:\n%s", entry)
+	if strings.Contains(entry, "Line one") || strings.Contains(entry, "Line two") {
+		t.Errorf("body should not appear in changelog:\n%s", entry)
+	}
+	if !strings.Contains(entry, "Feature") {
+		t.Errorf("title should still appear in changelog:\n%s", entry)
 	}
 }
 

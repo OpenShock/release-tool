@@ -39,15 +39,6 @@ func RenderChangelog(data *ReleaseData, githubRepo string, maintainers map[strin
 				pr = fmt.Sprintf(" (#%d)", *c.PR)
 			}
 			fmt.Fprintf(&b, "- %s%s%s\n", c.Title.Text, badge, pr)
-			if c.Body != nil {
-				for _, line := range strings.Split(c.Body.Text, "\n") {
-					if strings.TrimSpace(line) == "" {
-						b.WriteByte('\n')
-					} else {
-						fmt.Fprintf(&b, "  %s\n", line)
-					}
-				}
-			}
 		}
 	}
 	b.WriteByte('\n')
