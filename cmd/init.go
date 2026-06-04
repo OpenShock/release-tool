@@ -138,7 +138,7 @@ func writeWorkflows(root, actionRef string, branches []string) error {
 	checkYML := fmt.Sprintf(`on:
   pull_request:
     branches: %s
-    types: [opened, reopened, synchronize, labeled, unlabeled]
+    types: [opened, reopened, synchronize, ready_for_review, labeled, unlabeled]
 
 name: check-changes
 
@@ -149,7 +149,9 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    if: "!contains(github.event.pull_request.labels.*.name, 'no-changelog')"
+    if: >-
+      !github.event.pull_request.draft &&
+      !contains(github.event.pull_request.labels.*.name, 'no-changelog')
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
