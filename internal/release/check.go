@@ -61,8 +61,19 @@ func RunCheck(p CheckParams) (Verdict, error) {
 	case len(added) == 0:
 		state = StateMissing
 	default:
-		if _, vErr := changes.ReadSubset(p.Root, added); vErr != nil {
+		ch, vErr := changes.ReadSubset(p.Root, added)
+		if vErr != nil {
 			state, detail = StateInvalid, vErr.Error()
+		} else {
+			for _, c := range ch {
+				if c.PR != nil || c.PRExplicitNone {
+					state = StateInvalid
+					detail += fmt.Sprintf("  - %s: pr field must not be set in a PR (it is assigned automatically at release time)\n", c.Filename)
+				}
+			}
+			if state == StateInvalid {
+				detail = "invalid change files:\n" + detail
+			}
 		}
 	}
 
