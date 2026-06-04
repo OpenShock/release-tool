@@ -186,12 +186,12 @@ Global flags available to `stable`, `rc`, `status`, `init`, and `new`:
 
 ## GitHub Action
 
-The composite action wraps the CLI and exposes four modes:
+The composite action wraps the CLI and exposes five modes:
 
 ```yaml
 - uses: OpenShock/release-tool@v1
   with:
-    mode: stable               # stable | beta | develop | status
+    mode: stable               # stable | beta | develop | status | check
     dry-run: false
     output: release.json
     notes-output: release-notes.md
@@ -203,9 +203,41 @@ Mode behavior:
 - `stable`: consumes pending change files and updates `CHANGELOG.md`
 - `beta`: creates prerelease tags from changes since the last beta or stable tag
 - `develop`: creates prerelease tags from changes since the last develop, beta, or stable tag, always with git SHA metadata and allowing empty cuts
-- `status`: validates pending changes and prints the next version without creating a tag (useful as a PR check)
+- `status`: validates pending changes and prints the next version without creating a tag (useful as a push-time check)
+- `check`: validates the change files a pull request adds and writes `release-check.json` (see below)
 
 Action outputs:
 - `tag`: created tag, empty when skipped
 - `prerelease`: `true` for prerelease tags
 - `skip`: `true` when no release was created
+
+## Pull request change-file check
+
+`mode: check` evaluates the change files a pull request adds relative to its base
+branch and writes a verdict (`ok`, `missing`, `invalid`, or `skip`) to
+`release-check.json`. The job exits non-zero on `invalid`, so it works as a merge
+gate. The base branch is resolved through the `branches` map in
+`.changes/config.json`, which is the single source of truth for which branches
+are release branches:
+
+```json
+{
+  "branches": { "master": "stable", "beta": "beta", "develop": "develop" }
+}
+```
+
+A pull request whose base is not listed yields `skip` (no gate, no comment).
+
+To post the verdict as a sticky comment without exposing a write token to
+untrusted fork code, use a two-stage setup:
+
+1. A `pull_request` workflow (`permissions: contents: read`, no secrets) runs
+   `mode: check` and uploads `release-check.json` as an artifact. Its exit code is
+   the gate, so it works for fork pull requests.
+2. A `workflow_run` workflow (`permissions: pull-requests: write`) triggers on the
+   first one's completion, downloads the artifact, and posts the comment. It never
+   checks out or runs pull request code, so the write token never meets untrusted
+   input.
+
+See `.github/workflows/pr-check.yml` and `pr-check-comment.yml` in the
+`cicd-playground` repo for a working example.

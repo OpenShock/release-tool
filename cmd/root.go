@@ -21,6 +21,9 @@ var (
 var rootCmd = &cobra.Command{
 	Use:   "release-tool",
 	Short: "OpenShock release tool - manages .changes files and versioned releases",
+	// Errors are validation/runtime failures, not usage mistakes; don't dump
+	// the help text on every error.
+	SilenceUsage: true,
 }
 
 func Execute() {

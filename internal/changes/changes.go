@@ -25,6 +25,10 @@ type Config struct {
 	// Categories, when non-empty, is the allowlist of category names a change
 	// file may declare. When empty, any category string is accepted.
 	Categories []string `json:"categories"`
+	// Branches maps a release branch name to its lane (stable|beta|develop).
+	// It is the single source of truth for which branches are release branches,
+	// used by the check command to recognise a pull request's base branch.
+	Branches map[string]string `json:"branches"`
 }
 
 func ReadConfig(root string) (*Config, error) {
