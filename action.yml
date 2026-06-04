@@ -7,16 +7,12 @@ branding:
 inputs:
   mode:
     description: >
-      Release mode: 'stable' (consumes .changes, updates CHANGELOG),
-      'beta' (prerelease, .changes since last beta or stable tag; use prerelease-label to set label e.g. rc, alpha, beta),
-      'develop' (prerelease, .changes since last develop/beta/stable tag, always tags with +sha),
-      'status' (validate pending changes and print the next version; creates no tag),
-      'check' (validate the change files a pull request adds and write release-check.json; creates no tag).
+      'release' reads .changes/config.json branch config to determine behavior (stable, prerelease, or no-tag),
+      'status' validates pending changes and prints the next version without creating a tag,
+      'check' validates the change files a pull request adds and writes release-check.json.
     required: true
     options:
-      - stable
-      - beta
-      - develop
+      - release
       - status
       - check
   dry-run:
@@ -31,14 +27,6 @@ inputs:
     description: Path to write markdown release notes (relative to the consuming repo root)
     required: false
     default: ''
-  prerelease-label:
-    description: Override the prerelease label (e.g. rc, alpha, beta). Falls back to .changes/config.json.
-    required: false
-    default: ''
-  git-sha:
-    description: Append the short git SHA as build metadata to prerelease tags (e.g. 1.2.3-rc.1+gabc1234).
-    required: false
-    default: 'false'
   base-ref:
     description: "check mode: PR base branch name (resolved via config.json branches)"
     required: false
@@ -58,13 +46,13 @@ inputs:
 
 outputs:
   tag:
-    description: The tag that was created (empty when skip=true)
+    description: The tag that was created (empty when no tag was created)
     value: ${{ steps.run.outputs.tag }}
   prerelease:
     description: Whether the created tag is a prerelease
     value: ${{ steps.run.outputs.prerelease }}
   skip:
-    description: true when there were no pending changes and no tag was created
+    description: true when there were no pending changes
     value: ${{ steps.run.outputs.skip }}
 
 runs:
@@ -89,43 +77,27 @@ runs:
         RELEASE_MODE: ${{ inputs.mode }}
         RELEASE_OUTPUT: ${{ inputs.output }}
         RELEASE_NOTES: ${{ inputs.notes-output }}
-        PRERELEASE_LABEL: ${{ inputs.prerelease-label }}
-        GIT_SHA: ${{ inputs.git-sha }}
         WORKSPACE: ${{ github.workspace }}
         BASE_REF: ${{ inputs.base-ref }}
         BASE_SHA: ${{ inputs.base-sha }}
         PR_NUMBER: ${{ inputs.pr-number }}
       run: |
-        ARGS=(
-          --root   "$WORKSPACE"
-          --output "$WORKSPACE/$RELEASE_OUTPUT"
-        )
-        [ -n "$RELEASE_NOTES" ] && ARGS+=(--notes "$WORKSPACE/$RELEASE_NOTES")
-        [ "$DRY_RUN" = "true" ] && ARGS+=(--dry-run)
-
         case "$RELEASE_MODE" in
-          stable)
-            go run . "${ARGS[@]}" stable
-            ;;
-          beta)
-            go run . "${ARGS[@]}" rc \
-              --prerelease-label "${PRERELEASE_LABEL:-beta}"
-            ;;
-          develop)
-            go run . "${ARGS[@]}" rc \
-              --prerelease-label "${PRERELEASE_LABEL:-develop}" \
-              --git-sha \
-              --allow-empty
+          release)
+            ARGS=(--root "$WORKSPACE" --output "$WORKSPACE/$RELEASE_OUTPUT")
+            [ -n "$RELEASE_NOTES" ] && ARGS+=(--notes "$WORKSPACE/$RELEASE_NOTES")
+            [ "$DRY_RUN" = "true" ] && ARGS+=(--dry-run)
+            go run . release "${ARGS[@]}"
             ;;
           status)
-            go run . --root "$WORKSPACE" status
+            go run . status --root "$WORKSPACE"
             ;;
           check)
-            go run . --root "$WORKSPACE" check \
-              --base "$BASE_REF" \
+            go run . check --root "$WORKSPACE" \
+              --base    "$BASE_REF" \
               --against "$BASE_SHA" \
-              --pr "$PR_NUMBER" \
-              --out "$WORKSPACE/release-check.json"
+              --pr      "$PR_NUMBER" \
+              --out     "$WORKSPACE/release-check.json"
             ;;
           *)
             echo "Unknown mode: $RELEASE_MODE" >&2

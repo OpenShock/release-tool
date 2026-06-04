@@ -20,15 +20,26 @@ const (
 	ConfigFile   = "config.json"
 )
 
+type ReleaseMode string
+
+const (
+	ReleaseModeNone       ReleaseMode = "none"
+	ReleaseModeStable     ReleaseMode = "stable"
+	ReleaseModePrerelease ReleaseMode = "prerelease"
+)
+
+// BranchConfig describes how a branch behaves for releases and PR checks.
+// A branch present in the map requires a change file on PRs targeting it.
+type BranchConfig struct {
+	Release ReleaseMode `json:"release,omitempty"`
+	Label   string      `json:"label,omitempty"`
+	SHA     bool        `json:"sha,omitempty"`
+}
+
 type Config struct {
-	TagPrefix string `json:"tag_prefix"`
-	// Categories, when non-empty, is the allowlist of category names a change
-	// file may declare. When empty, any category string is accepted.
-	Categories []string `json:"categories"`
-	// Branches maps a release branch name to its lane (stable|beta|develop).
-	// It is the single source of truth for which branches are release branches,
-	// used by the check command to recognise a pull request's base branch.
-	Branches map[string]string `json:"branches"`
+	TagPrefix  string                  `json:"tag_prefix"`
+	Categories []string                `json:"categories"`
+	Branches   map[string]BranchConfig `json:"branches"`
 }
 
 func ReadConfig(root string) (*Config, error) {

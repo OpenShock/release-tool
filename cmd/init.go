@@ -4,19 +4,29 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/OpenShock/release-tool/internal/changes"
 	"github.com/spf13/cobra"
 )
 
+var (
+	initActionRef   string
+	initBranches    []string
+	initNoWorkflows bool
+)
+
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Initialise .changes/ in the target repo",
+	Short: "Initialise .changes/ and GitHub Actions workflows in the target repo",
 	RunE:  runInit,
 }
 
 func init() {
 	rootCmd.AddCommand(initCmd)
+	initCmd.Flags().StringVar(&initActionRef, "action-ref", "OpenShock/release-tool@main", "Action ref to use in generated workflows (pin to a SHA for production)")
+	initCmd.Flags().StringSliceVar(&initBranches, "branches", []string{"master"}, "Release branches for check-changes workflow trigger")
+	initCmd.Flags().BoolVar(&initNoWorkflows, "no-workflows", false, "Skip creating .github/workflows/ files")
 }
 
 const changesReadme = `# Change Files
@@ -66,11 +76,185 @@ func runInit(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("creating %s: %w", changes.Dir, err)
 	}
 
-	readmePath := filepath.Join(dir, "README.md")
-	if err := os.WriteFile(readmePath, []byte(changesReadme), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte(changesReadme), 0644); err != nil {
 		return fmt.Errorf("writing README: %w", err)
 	}
 
+	configJSON := buildConfigJSON(initBranches)
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(configJSON), 0644); err != nil {
+		return fmt.Errorf("writing config.json: %w", err)
+	}
+
 	fmt.Fprintf(os.Stderr, "Initialised %s/\n", changes.Dir)
+
+	if !initNoWorkflows {
+		if err := writeWorkflows(root, initActionRef, initBranches); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func buildConfigJSON(branches []string) string {
+	var branchEntries []string
+	for i, b := range branches {
+		var entry string
+		if i == 0 {
+			entry = fmt.Sprintf(`    %q: { "release": "stable" }`, b)
+		} else {
+			entry = fmt.Sprintf(`    %q: { "release": "prerelease", "label": %q }`, b, b)
+		}
+		branchEntries = append(branchEntries, entry)
+	}
+	return fmt.Sprintf(`{
+  "tag_prefix": "",
+  "categories": [],
+  "branches": {
+%s
+  }
+}
+`, strings.Join(branchEntries, ",\n"))
+}
+
+func writeWorkflows(root, actionRef string, branches []string) error {
+	wfDir := filepath.Join(root, ".github", "workflows")
+	if err := os.MkdirAll(wfDir, 0755); err != nil {
+		return fmt.Errorf("creating .github/workflows: %w", err)
+	}
+
+	branchList := `[` + strings.Join(func() []string {
+		out := make([]string, len(branches))
+		for i, b := range branches {
+			out[i] = b
+		}
+		return out
+	}(), ", ") + `]`
+
+	checkYML := fmt.Sprintf(`on:
+  pull_request:
+    branches: %s
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+
+name: check-changes
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: "!contains(github.event.pull_request.labels.*.name, 'no-changelog')"
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Run change file check
+        uses: %s
+        with:
+          mode: check
+          base-ref: ${{ github.event.pull_request.base.ref }}
+          base-sha: ${{ github.event.pull_request.base.sha }}
+          pr-number: ${{ github.event.pull_request.number }}
+
+      - name: Upload verdict
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-check
+          path: release-check.json
+          if-no-files-found: warn
+`, branchList, actionRef)
+
+	commentYML := `on:
+  workflow_run:
+    workflows: [check-changes]
+    types: [completed]
+
+name: pr-check-comment
+
+permissions:
+  pull-requests: write
+
+jobs:
+  comment:
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.event == 'pull_request'
+    steps:
+      - name: Download verdict
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-check
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Post or update sticky comment
+        if: steps.download.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          STATE=$(jq -r '.state' release-check.json)
+          PR=$(jq -r '.pr' release-check.json)
+          BODY=$(jq -r '.body' release-check.json)
+
+          if [ "$STATE" = "skip" ] || [ "$PR" = "0" ] || [ -z "$PR" ] || [ "$PR" = "null" ]; then
+            echo "No comment to post (state=$STATE pr=$PR)"
+            exit 0
+          fi
+
+          EXISTING=$(gh api "repos/$GH_REPO/issues/$PR/comments" \
+            --jq '[.[] | select(.body | contains("<!-- release-tool-check -->"))] | first | .id // empty')
+
+          if [ -n "$EXISTING" ]; then
+            gh api --method PATCH "repos/$GH_REPO/issues/comments/$EXISTING" \
+              --field body="$BODY"
+          else
+            gh api --method POST "repos/$GH_REPO/issues/$PR/comments" \
+              --field body="$BODY"
+          fi
+
+      - name: Remove stale comment when check was skipped
+        if: steps.download.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          if [ -z "$PR" ] || [ "$PR" = "null" ]; then
+            echo "No PR number available, skipping"
+            exit 0
+          fi
+          EXISTING=$(gh api "repos/$GH_REPO/issues/$PR/comments" \
+            --jq '[.[] | select(.body | contains("<!-- release-tool-check -->"))] | first | .id // empty')
+          if [ -n "$EXISTING" ]; then
+            gh api --method DELETE "repos/$GH_REPO/issues/comments/$EXISTING"
+            echo "Deleted stale release-tool comment $EXISTING on PR #$PR"
+          fi
+`
+
+	checkPath := filepath.Join(wfDir, "check-changes.yml")
+	commentPath := filepath.Join(wfDir, "pr-check-comment.yml")
+
+	for _, f := range []string{checkPath, commentPath} {
+		if _, err := os.Stat(f); err == nil {
+			return fmt.Errorf("%s already exists", f)
+		}
+	}
+
+	if err := os.WriteFile(checkPath, []byte(checkYML), 0644); err != nil {
+		return fmt.Errorf("writing check-changes.yml: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "Created .github/workflows/check-changes.yml\n")
+
+	if err := os.WriteFile(commentPath, []byte(commentYML), 0644); err != nil {
+		return fmt.Errorf("writing pr-check-comment.yml: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "Created .github/workflows/pr-check-comment.yml\n")
+
 	return nil
 }

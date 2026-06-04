@@ -9,20 +9,9 @@ import (
 	"github.com/OpenShock/release-tool/internal/changes"
 	"github.com/OpenShock/release-tool/internal/git"
 	"github.com/OpenShock/release-tool/internal/release"
-	"github.com/spf13/cobra"
 )
 
-var stableCmd = &cobra.Command{
-	Use:   "stable",
-	Short: "Promote to stable release, consume .changes files, update CHANGELOG.md",
-	RunE:  runStable,
-}
-
-func init() {
-	rootCmd.AddCommand(stableCmd)
-}
-
-func runStable(_ *cobra.Command, _ []string) error {
+func runRelease() error {
 	root := projectRoot()
 
 	ch, err := changes.Read(root)

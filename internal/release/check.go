@@ -44,7 +44,10 @@ type CheckParams struct {
 // when the PR adds no change file, invalid when an added file fails validation,
 // and ok otherwise. It performs no network or comment side effects.
 func RunCheck(p CheckParams) (Verdict, error) {
-	if p.Config == nil || p.Config.Branches[p.BaseBranch] == "" {
+	if p.Config == nil {
+		return Verdict{State: StateSkip, PR: p.PR}, nil
+	}
+	if _, ok := p.Config.Branches[p.BaseBranch]; !ok {
 		return Verdict{State: StateSkip, PR: p.PR}, nil
 	}
 

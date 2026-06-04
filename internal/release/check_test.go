@@ -12,7 +12,7 @@ func TestRunCheck_SkipWhenNotReleaseBranch(t *testing.T) {
 	v, err := RunCheck(CheckParams{
 		BaseBranch: "some-feature-branch",
 		PR:         7,
-		Config:     &changes.Config{Branches: map[string]string{"master": "stable"}},
+		Config:     &changes.Config{Branches: map[string]changes.BranchConfig{"master": {}}},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
