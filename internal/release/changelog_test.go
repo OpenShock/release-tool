@@ -116,17 +116,16 @@ func TestRenderChangelog_PRLink(t *testing.T) {
 	}
 }
 
-func TestRenderChangelog_BodyNotInChangelog(t *testing.T) {
-	body := "Line one\nLine two"
+func TestRenderChangelog_OnlyTitleInChangelog(t *testing.T) {
 	d := &ReleaseData{
 		Tag: "1.1.0",
 		Changes: []ChangeEntry{
-			{Type: "minor", Title: MDText{Text: "Feature"}, Body: &MDText{Text: body}, Notices: []NoticeEntry{}, Categories: []string{}},
+			{Type: "minor", Title: MDText{Text: "Feature"}, Notices: []NoticeEntry{}, Categories: []string{}},
 		},
 	}
 	entry := RenderChangelog(d, "", nil)
-	if strings.Contains(entry, "Line one") || strings.Contains(entry, "Line two") {
-		t.Errorf("body should not appear in changelog:\n%s", entry)
+	if !strings.Contains(entry, "- Feature") {
+		t.Errorf("title should appear as bullet in changelog:\n%s", entry)
 	}
 	if !strings.Contains(entry, "Feature") {
 		t.Errorf("title should still appear in changelog:\n%s", entry)

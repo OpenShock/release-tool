@@ -10,7 +10,6 @@ func makeChange(bump, title string, breaking bool, categories []string) *changes
 	return &changes.Change{
 		Bump:        bump,
 		Title:       title,
-		Body:        "body text",
 		ReleaseNote: "release note text",
 		Breaking:    breaking,
 		Categories:  categories,
@@ -86,9 +85,6 @@ func TestBuildData_Changes(t *testing.T) {
 	}
 	if e.Title.Text != "Breaking change" {
 		t.Errorf("Title.Text: got %q", e.Title.Text)
-	}
-	if e.Body == nil || e.Body.Text != "body text" {
-		t.Errorf("Body: got %v", e.Body)
 	}
 	if e.ReleaseNote == nil || e.ReleaseNote.Title.Text != "release note text" {
 		t.Errorf("ReleaseNote.Title: got %v", e.ReleaseNote)

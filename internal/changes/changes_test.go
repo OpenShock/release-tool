@@ -38,8 +38,6 @@ categories: [api, firmware]
 ---
 Add new endpoint
 
-Extended description here.
-
 ## Release Note
 Short release note for consumers.
 
@@ -60,9 +58,6 @@ Short release note for consumers.
 	}
 	if c.Title != "Add new endpoint" {
 		t.Errorf("Title: got %q", c.Title)
-	}
-	if c.Body != "Extended description here." {
-		t.Errorf("Body: got %q", c.Body)
 	}
 	if c.ReleaseNote != "Short release note for consumers." {
 		t.Errorf("ReleaseNote: got %q", c.ReleaseNote)

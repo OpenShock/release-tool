@@ -65,7 +65,6 @@ type Notice struct {
 type Change struct {
 	Bump        string
 	Title       string
-	Body        string
 	ReleaseNote string
 	Notices     []Notice
 	Filename    string
@@ -186,8 +185,7 @@ func parseFile(path string) (*Change, error) {
 		return nil, fmt.Errorf("%s: missing title line", filename)
 	}
 
-	title, body, _ := strings.Cut(changelogRaw, "\n")
-	title = strings.TrimSpace(title)
+	title := strings.TrimSpace(strings.SplitN(changelogRaw, "\n", 2)[0])
 	if title == "" {
 		return nil, fmt.Errorf("%s: title line is empty", filename)
 	}
@@ -219,7 +217,6 @@ func parseFile(path string) (*Change, error) {
 	return &Change{
 		Bump:           fm.Type,
 		Title:          title,
-		Body:           strings.TrimSpace(body),
 		ReleaseNote:    releaseNote,
 		Notices:        notices,
 		Filename:       filename,

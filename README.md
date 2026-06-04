@@ -260,7 +260,6 @@ categories: [api]    # optional; validated against allowlist if set in config.js
 ---
 Title shown in changelog (required, first line)
 
-Optional extended body shown in the changelog entry.
 
 ## Release Note
 Plain-language note for end users. Included in release.json, not in CHANGELOG.md.

@@ -48,12 +48,12 @@ type: minor        # major | minor | patch
 breaking: false    # optional; major defaults to true
 categories: []     # optional list of labels
 ---
-Title of the change (first line, required)
-
-Optional longer description in Markdown.
+Title of the change (single line, required)
 
 ## Release Note
-Optional consumer-facing note included in release.json but not the changelog.
+Consumer-facing title line (required if section present)
+
+Optional longer explanation shown in release.json but not in CHANGELOG.md.
 
 ## Notices
 - warning: something users must know before upgrading
