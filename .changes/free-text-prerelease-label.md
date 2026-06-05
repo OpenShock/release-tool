@@ -1,6 +1,5 @@
 ---
-type: minor
-categories: [ci]
+kind: changed
 ---
 Workflow dispatch accepts any prerelease label as free text
 

@@ -1,6 +1,5 @@
 ---
-type: minor
-categories: [cli]
+kind: added
 ---
 Change files can pin or suppress the PR number via frontmatter
 

@@ -1,6 +1,5 @@
 ---
-type: minor
-categories: [cli, ci]
+kind: added
 ---
 Branch config now controls release behaviour via a `release` enum
 

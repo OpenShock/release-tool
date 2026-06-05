@@ -1,6 +1,5 @@
 ---
-type: minor
-categories: [ci]
+kind: added
 ---
 Two-stage workflow_run PR comment for change file check
 

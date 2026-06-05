@@ -1,6 +1,5 @@
 ---
-type: minor
-categories: [cli]
+kind: changed
 ---
 Changelog entries show title only; release note gains title and body
 

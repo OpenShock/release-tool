@@ -37,9 +37,8 @@ type BranchConfig struct {
 }
 
 type Config struct {
-	TagPrefix  string                  `json:"tag_prefix"`
-	Categories []string                `json:"categories"`
-	Branches   map[string]BranchConfig `json:"branches"`
+	TagPrefix string                  `json:"tag_prefix"`
+	Branches  map[string]BranchConfig `json:"branches"`
 }
 
 func ReadConfig(root string) (*Config, error) {
@@ -63,13 +62,14 @@ type Notice struct {
 }
 
 type Change struct {
-	Bump        string
+	Kind        string
+	Bump        string // derived: major | minor | patch
 	Title       string
 	ReleaseNote string
 	Notices     []Notice
 	Filename    string
 	Breaking    bool
-	Categories  []string
+	Mandatory   bool
 	// PR, when non-nil, is the verbatim PR number set in frontmatter, used
 	// as-is instead of deriving from git history. PRExplicitNone records an
 	// explicit `pr: null`, which suppresses PR derivation entirely.
@@ -84,14 +84,20 @@ func (c *Change) Slug() string {
 var frontmatterRe = regexp.MustCompile(`(?s)^---\r?\n(.*?)\r?\n---\r?\n(.*)$`)
 
 type rawFrontmatter struct {
-	Type       string   `yaml:"type"`
-	Breaking   *bool    `yaml:"breaking"`
-	Categories []string `yaml:"categories"`
+	Kind      string `yaml:"kind"`
+	Breaking  *bool  `yaml:"breaking"`
+	Mandatory *bool  `yaml:"mandatory"`
 	// PR is a raw node so we can distinguish absent (derive), explicit null
 	// (suppress), and an integer (verbatim). A zero Kind means the key was
 	// absent. (Must be a value, not a pointer: yaml.v3 only special-cases
 	// decoding into yaml.Node by value.)
 	PR yaml.Node `yaml:"pr"`
+}
+
+var validKinds = map[string]bool{
+	"added": true, "changed": true, "deprecated": true,
+	"removed": true, "fixed": true, "security": true,
+	"safety": true, "chore": true,
 }
 
 var knownSections = map[string]bool{
@@ -152,6 +158,17 @@ func parseNotices(raw string) ([]Notice, error) {
 	return out, nil
 }
 
+func DeriveBump(kind string, breaking bool) string {
+	if breaking {
+		return "major"
+	}
+	switch kind {
+	case "fixed", "security", "safety", "chore":
+		return "patch"
+	}
+	return "minor"
+}
+
 func parseFile(path string) (*Change, error) {
 	filename := filepath.Base(path)
 	content, err := os.ReadFile(path)
@@ -169,15 +186,18 @@ func parseFile(path string) (*Change, error) {
 		return nil, fmt.Errorf("%s: invalid YAML: %w", filename, err)
 	}
 
-	switch fm.Type {
-	case "major", "minor", "patch":
-	default:
-		return nil, fmt.Errorf("%s: type must be major|minor|patch, got %q", filename, fm.Type)
+	if !validKinds[fm.Kind] {
+		return nil, fmt.Errorf("%s: kind must be added|changed|deprecated|removed|fixed|security, got %q", filename, fm.Kind)
 	}
 
-	breaking := fm.Type == "major"
+	breaking := false
 	if fm.Breaking != nil {
 		breaking = *fm.Breaking
+	}
+
+	mandatory := false
+	if fm.Mandatory != nil {
+		mandatory = *fm.Mandatory
 	}
 
 	changelogRaw, releaseNote, noticesRaw := splitSections(strings.TrimSpace(string(m[2])))
@@ -188,11 +208,6 @@ func parseFile(path string) (*Change, error) {
 	title := strings.TrimSpace(strings.SplitN(changelogRaw, "\n", 2)[0])
 	if title == "" {
 		return nil, fmt.Errorf("%s: title line is empty", filename)
-	}
-
-	categories := fm.Categories
-	if categories == nil {
-		categories = []string{}
 	}
 
 	notices, err := parseNotices(noticesRaw)
@@ -215,13 +230,14 @@ func parseFile(path string) (*Change, error) {
 	}
 
 	return &Change{
-		Bump:           fm.Type,
+		Kind:           fm.Kind,
+		Bump:           DeriveBump(fm.Kind, breaking),
 		Title:          title,
 		ReleaseNote:    releaseNote,
 		Notices:        notices,
 		Filename:       filename,
 		Breaking:       breaking,
-		Categories:     categories,
+		Mandatory:      mandatory,
 		PR:             prNum,
 		PRExplicitNone: prExplicitNone,
 	}, nil
@@ -277,44 +293,7 @@ func Read(root string) ([]*Change, error) {
 	}
 	sort.Strings(paths)
 
-	out, err := parseAll(paths, false)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateCategories(root, out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// validateCategories rejects change files declaring categories outside the
-// allowlist in config.json. When the allowlist is empty, any category is
-// accepted (the pre-existing behavior).
-func validateCategories(root string, list []*Change) error {
-	cfg, err := ReadConfig(root)
-	if err != nil {
-		return err
-	}
-	if len(cfg.Categories) == 0 {
-		return nil
-	}
-	allowed := make(map[string]bool, len(cfg.Categories))
-	for _, c := range cfg.Categories {
-		allowed[c] = true
-	}
-	var errs []string
-	for _, ch := range list {
-		for _, cat := range ch.Categories {
-			if !allowed[cat] {
-				errs = append(errs, fmt.Sprintf("%s: unknown category %q (allowed: %s)",
-					ch.Filename, cat, strings.Join(cfg.Categories, ", ")))
-			}
-		}
-	}
-	if len(errs) > 0 {
-		return invalidFilesErr(errs)
-	}
-	return nil
+	return parseAll(paths, false)
 }
 
 // ReadSubset reads and parses only the named files (basenames) from .changes/.
@@ -330,14 +309,7 @@ func ReadSubset(root string, filenames []string) ([]*Change, error) {
 		paths = append(paths, filepath.Join(root, Dir, filepath.Base(name)))
 	}
 
-	out, err := parseAll(paths, true)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateCategories(root, out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return parseAll(paths, true)
 }
 
 func ReadHeadline(root string) string {

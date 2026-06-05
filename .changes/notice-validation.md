@@ -1,6 +1,5 @@
 ---
-type: minor
-categories: [cli]
+kind: changed
 ---
 Notice lines are now validated
 

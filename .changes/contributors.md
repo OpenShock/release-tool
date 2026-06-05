@@ -1,6 +1,5 @@
 ---
-type: minor
-categories: [cli]
+kind: added
 ---
 Releases record contributors
 

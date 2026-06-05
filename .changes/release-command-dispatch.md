@@ -1,6 +1,5 @@
 ---
-type: minor
-categories: [cli]
+kind: changed
 ---
 `release` command auto-dispatches based on branch config
 

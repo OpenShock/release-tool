@@ -1,6 +1,5 @@
 {
   "tag_prefix": "v",
-  "categories": ["cli", "ci"],
   "branches": {
     "alpha":  { "release": "prerelease", "label": "alpha" },
     "master": { "release": "stable" }

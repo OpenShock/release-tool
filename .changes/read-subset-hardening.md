@@ -1,6 +1,5 @@
 ---
-type: patch
-categories: [cli]
+kind: fixed
 ---
 Fix subset reads skipping missing files and guard against path escapes
 

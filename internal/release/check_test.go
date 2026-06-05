@@ -19,7 +19,7 @@ func makeRepo(t *testing.T, files map[string]string) string {
 		t.Fatal(err)
 	}
 	// config.json with empty categories so any category is accepted
-	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"tag_prefix":"","categories":[],"branches":{"master":{}}}`), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"tag_prefix":"","branches":{"master":{}}}`), 0644); err != nil {
 		t.Fatal(err)
 	}
 	for name, content := range files {
@@ -103,7 +103,7 @@ func TestRunCheck_MissingWhenNoFilesAdded(t *testing.T) {
 
 func TestRunCheck_InvalidPRField_Number(t *testing.T) {
 	root := makeRepo(t, map[string]string{
-		"my-change.md": "---\ntype: patch\npr: 42\n---\n\nSome change\n",
+		"my-change.md": "---\nkind: fixed\npr: 42\n---\n\nSome change\n",
 	})
 
 	// Inject the parsed change directly by testing via ReadSubset path.
@@ -138,7 +138,7 @@ func TestRunCheck_InvalidPRField_Number(t *testing.T) {
 
 func TestRunCheck_InvalidPRField_Null(t *testing.T) {
 	root := makeRepo(t, map[string]string{
-		"suppress-pr.md": "---\ntype: patch\npr: null\n---\n\nSome change\n",
+		"suppress-pr.md": "---\nkind: fixed\npr: null\n---\n\nSome change\n",
 	})
 
 	ch, err := changes.ReadSubset(root, []string{"suppress-pr.md"})
@@ -165,7 +165,7 @@ func TestRunCheck_InvalidPRField_Null(t *testing.T) {
 
 func TestRunCheck_ValidChangeFile_NoPRField(t *testing.T) {
 	root := makeRepo(t, map[string]string{
-		"good-change.md": "---\ntype: minor\n---\n\nA valid change\n",
+		"good-change.md": "---\nkind: added\n---\n\nA valid change\n",
 	})
 
 	ch, err := changes.ReadSubset(root, []string{"good-change.md"})

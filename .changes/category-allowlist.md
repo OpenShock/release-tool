@@ -1,6 +1,5 @@
 ---
-type: minor
-categories: [cli]
+kind: added
 ---
 Optional category allowlist in config.json
 

@@ -1,6 +1,5 @@
 ---
-type: minor
-categories: [ci]
+kind: changed
 ---
 Action pared down to three modes: `release`, `status`, `check`
 

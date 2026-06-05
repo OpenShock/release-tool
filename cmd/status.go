@@ -60,8 +60,8 @@ func runStatus(_ *cobra.Command, _ []string) error {
 		if c.Breaking {
 			flags = append(flags, "breaking")
 		}
-		if len(c.Categories) > 0 {
-			flags = append(flags, "cat:"+strings.Join(c.Categories, ","))
+		if c.Mandatory {
+			flags = append(flags, "mandatory")
 		}
 		if c.ReleaseNote != "" {
 			flags = append(flags, "release_note")
@@ -73,7 +73,7 @@ func runStatus(_ *cobra.Command, _ []string) error {
 		if len(flags) > 0 {
 			extra = "  (" + strings.Join(flags, ", ") + ")"
 		}
-		fmt.Printf("  [%s] %s%s  <- %s\n", c.Bump, c.Title, extra, c.Filename)
+		fmt.Printf("  [%s/%s] %s%s  <- %s\n", c.Kind, c.Bump, c.Title, extra, c.Filename)
 	}
 
 	headline := changes.ReadHeadline(root)

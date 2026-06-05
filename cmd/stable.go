@@ -47,6 +47,8 @@ func runRelease() error {
 
 	prevTag, maintainers := enrichment(root, cfg, latest)
 
+	githubRepo := os.Getenv("GITHUB_REPOSITORY")
+
 	data := release.BuildData(release.BuildParams{
 		Tag:         tag,
 		Previous:    latest,
@@ -58,9 +60,10 @@ func runRelease() error {
 		Version:     base,
 		Root:        root,
 		EnrichPR:    !dryRun,
+		GithubRepo: githubRepo,
 	})
 
-	entry := release.RenderChangelog(data, os.Getenv("GITHUB_REPOSITORY"), maintainers)
+	entry := release.RenderChangelog(data, githubRepo)
 
 	if dryRun {
 		fmt.Fprintf(os.Stderr, "Would create tag: %s\n", tag)
@@ -74,7 +77,7 @@ func runRelease() error {
 		return err
 	}
 	if notes != "" {
-		if err := release.WriteNotes(notes, data, os.Getenv("GITHUB_REPOSITORY"), maintainers); err != nil {
+		if err := release.WriteNotes(notes, data, maintainers); err != nil {
 			return err
 		}
 	}

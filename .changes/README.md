@@ -7,27 +7,33 @@ included in the next release.
 
 ```
 ---
-type: minor        # major | minor | patch
-breaking: false    # optional; major defaults to true
-categories: []     # optional list of labels
+kind: added       # added | changed | deprecated | removed | fixed | security
+breaking: false   # optional; true forces a major semver bump
+mandatory: false  # optional; true means this version must be installed before newer ones
 ---
-Title of the change (first line, required)
-
-Optional longer description in Markdown.
+Technical title (required, one line — appears in CHANGELOG and GitHub Release header)
 
 ## Release Note
-Optional consumer-facing note included in release.json but not the changelog.
+User-facing title line (appears in Discord draft and release.json)
+Additional description lines shown in GitHub Release and release.json.
 
 ## Notices
 - warning: something users must know before upgrading
 - info: optional note or migration step
 ```
 
+## Semver derivation
+
+- `breaking: true` → major bump
+- `kind: fixed` or `kind: security` → patch bump
+- everything else → minor bump
+
 ## File naming
 
 Name the file after the change (e.g. `add-user-auth.md`).
-Run `release-tool new "<title>" --type minor` to generate one automatically.
+Run `release-tool new "<title>" --kind added` to generate one automatically.
 
 ## Special files
 
-- `_headline.md` - optional release headline shown at the top of the changelog entry
+- `_headline.md` — optional per-release narrative shown at the top of the GitHub Release
+  body

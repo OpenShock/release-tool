@@ -1,6 +1,5 @@
 ---
-type: minor
-categories: [ci]
+kind: added
 ---
 Add a check command and branches config for pull request validation
 

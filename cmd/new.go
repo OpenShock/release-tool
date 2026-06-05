@@ -13,9 +13,9 @@ import (
 )
 
 var (
-	newType       string
-	newBreaking   bool
-	newCategories []string
+	newKind     string
+	newBreaking bool
+	newMandatory bool
 )
 
 var newCmd = &cobra.Command{
@@ -32,9 +32,9 @@ var newCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(newCmd)
-	newCmd.Flags().StringVarP(&newType, "type", "t", "", "Bump type: major, minor, or patch (required in CI)")
-	newCmd.Flags().BoolVarP(&newBreaking, "breaking", "b", false, "Mark as breaking (implied for major)")
-	newCmd.Flags().StringSliceVarP(&newCategories, "categories", "c", nil, "Categories (comma-separated)")
+	newCmd.Flags().StringVarP(&newKind, "kind", "k", "", "Change kind: added, changed, deprecated, removed, fixed, security (required in CI)")
+	newCmd.Flags().BoolVarP(&newBreaking, "breaking", "b", false, "Mark as breaking change (major semver bump)")
+	newCmd.Flags().BoolVar(&newMandatory, "mandatory", false, "Mark as a mandatory version (must be installed before newer versions)")
 }
 
 func isCI() bool {
@@ -53,9 +53,23 @@ func slugify(title string) string {
 	return s
 }
 
+var validKinds = []string{"added", "changed", "deprecated", "removed", "fixed", "security", "safety", "chore"}
+
+func isValidKind(k string) bool {
+	for _, v := range validKinds {
+		if k == v {
+			return true
+		}
+	}
+	return false
+}
+
 func runNewCI(cmd *cobra.Command, args []string) error {
-	if newType == "" {
-		return fmt.Errorf("--type is required in CI (major, minor, or patch)")
+	if newKind == "" {
+		return fmt.Errorf("--kind is required in CI (added, changed, deprecated, removed, fixed, security)")
+	}
+	if !isValidKind(newKind) {
+		return fmt.Errorf("invalid kind %q (must be added, changed, deprecated, removed, fixed, or security)", newKind)
 	}
 	title := ""
 	if len(args) > 0 {
@@ -64,8 +78,7 @@ func runNewCI(cmd *cobra.Command, args []string) error {
 	if title == "" {
 		return fmt.Errorf("title argument is required in CI")
 	}
-	breakingSet := cmd.Flags().Changed("breaking")
-	return writeChangeFile(title, newType, newBreaking, breakingSet, newCategories)
+	return writeChangeFile(title, newKind, newBreaking, newMandatory)
 }
 
 func runNewInteractive(args []string) error {
@@ -74,9 +87,9 @@ func runNewInteractive(args []string) error {
 		title = strings.TrimSpace(args[0])
 	}
 
-	bumpType := newType
-	breaking := false
-	categoriesInput := ""
+	kind := newKind
+	breaking := newBreaking
+	mandatory := newMandatory
 
 	fields := []huh.Field{}
 
@@ -87,23 +100,21 @@ func runNewInteractive(args []string) error {
 			Value(&title))
 	}
 
-	if bumpType == "" {
+	if kind == "" {
 		fields = append(fields, huh.NewSelect[string]().
-			Title("Bump type").
+			Title("Change kind").
 			Options(
-				huh.NewOption("patch - backwards-compatible bug fix", "patch"),
-				huh.NewOption("minor - new backwards-compatible feature", "minor"),
-				huh.NewOption("major - breaking change", "major"),
+				huh.NewOption("added - new feature or capability", "added"),
+				huh.NewOption("changed - change to existing functionality", "changed"),
+				huh.NewOption("deprecated - feature marked for removal", "deprecated"),
+				huh.NewOption("removed - feature removed", "removed"),
+				huh.NewOption("fixed - bug fix", "fixed"),
+				huh.NewOption("security - security vulnerability fix", "security"),
+				huh.NewOption("safety - physical safety improvement (e.g. e-stop)", "safety"),
+				huh.NewOption("chore - dependency bump, CI update, refactor", "chore"),
 			).
-			Value(&bumpType))
+			Value(&kind))
 	}
-
-	fields = append(fields,
-		huh.NewInput().
-			Title("Categories (optional, comma-separated)").
-			Placeholder("e.g. api, cli").
-			Value(&categoriesInput),
-	)
 
 	form := huh.NewForm(huh.NewGroup(fields...))
 	if err := form.Run(); err != nil {
@@ -115,23 +126,7 @@ func runNewInteractive(args []string) error {
 		return fmt.Errorf("title must not be empty")
 	}
 
-	// For major, ask about breaking only if user might want to opt out.
-	// For minor/patch, ask only if they want to mark as breaking.
-	breakingSet := false
-	if bumpType == "major" {
-		breaking = true
-		var optOut bool
-		confirm := huh.NewForm(huh.NewGroup(
-			huh.NewConfirm().
-				Title("Mark as breaking?").
-				Value(&optOut).
-				Affirmative("Yes").
-				Negative("No"),
-		))
-		_ = confirm.Run()
-		breaking = optOut
-		breakingSet = true
-	} else {
+	if !breaking {
 		var wantBreaking bool
 		confirm := huh.NewForm(huh.NewGroup(
 			huh.NewConfirm().
@@ -141,29 +136,15 @@ func runNewInteractive(args []string) error {
 				Negative("No"),
 		))
 		_ = confirm.Run()
-		if wantBreaking {
-			breaking = true
-			breakingSet = true
-		}
+		breaking = wantBreaking
 	}
 
-	var cats []string
-	if categoriesInput != "" {
-		for _, c := range strings.Split(categoriesInput, ",") {
-			if trimmed := strings.TrimSpace(c); trimmed != "" {
-				cats = append(cats, trimmed)
-			}
-		}
-	}
-
-	return writeChangeFile(title, bumpType, breaking, breakingSet, cats)
+	return writeChangeFile(title, kind, breaking, mandatory)
 }
 
-func writeChangeFile(title, bumpType string, breaking, breakingSet bool, categories []string) error {
-	switch bumpType {
-	case "major", "minor", "patch":
-	default:
-		return fmt.Errorf("type must be major, minor, or patch")
+func writeChangeFile(title, kind string, breaking, mandatory bool) error {
+	if !isValidKind(kind) {
+		return fmt.Errorf("kind must be added, changed, deprecated, removed, fixed, or security")
 	}
 
 	root := projectRoot()
@@ -184,16 +165,12 @@ func writeChangeFile(title, bumpType string, breaking, breakingSet bool, categor
 
 	var b strings.Builder
 	b.WriteString("---\n")
-	fmt.Fprintf(&b, "type: %s\n", bumpType)
-	if breakingSet {
-		if bumpType == "major" && !breaking {
-			b.WriteString("breaking: false\n")
-		} else if bumpType != "major" && breaking {
-			b.WriteString("breaking: true\n")
-		}
+	fmt.Fprintf(&b, "kind: %s\n", kind)
+	if breaking {
+		b.WriteString("breaking: true\n")
 	}
-	if len(categories) > 0 {
-		fmt.Fprintf(&b, "categories: [%s]\n", strings.Join(categories, ", "))
+	if mandatory {
+		b.WriteString("mandatory: true\n")
 	}
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "%s\n", title)

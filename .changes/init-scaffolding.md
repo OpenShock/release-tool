@@ -1,6 +1,5 @@
 ---
-type: minor
-categories: [cli]
+kind: added
 ---
 `init` scaffolds config.json and GitHub Actions workflows
 

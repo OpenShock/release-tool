@@ -1,6 +1,5 @@
 ---
-type: minor
-categories: [cli]
+kind: changed
 ---
 Prereleases no longer consume change files or update the changelog
 

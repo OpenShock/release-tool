@@ -3,65 +3,115 @@ package release
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
-// RenderChangelog derives a CHANGELOG.md entry from a ReleaseData struct.
-// maintainers (lowercased logins) and any *[bot] accounts are excluded from
-// the Contributors footer; pass nil to apply no maintainer filtering.
-func RenderChangelog(data *ReleaseData, githubRepo string, maintainers map[string]bool) string {
-	var b strings.Builder
+var kindOrder = []string{"added", "changed", "deprecated", "removed", "fixed", "security", "safety", "chore"}
 
-	fmt.Fprintf(&b, "# Version %s Release Notes\n\n", data.Tag)
+var kindHeading = map[string]string{
+	"added":      "Added",
+	"changed":    "Changed",
+	"deprecated": "Deprecated",
+	"removed":    "Removed",
+	"fixed":      "Fixed",
+	"security":   "Security",
+	"safety":     "Safety",
+	"chore":      "Chores",
+}
 
-	if data.Headline != nil {
-		b.WriteString(data.Headline.Text)
-		b.WriteString("\n\n")
-	}
+// isUserFacing returns true for kinds that appear in the GitHub Release body.
+// Chores are developer-internal and excluded from user-facing outputs.
+func isUserFacing(kind string) bool { return kind != "chore" }
 
-	for _, level := range []string{"major", "minor", "patch"} {
-		for _, c := range data.Changes {
-			if c.Type != level {
-				continue
+// renderSections writes KaC-style ### Kind sections for the given kinds filter.
+// Pass nil to include all kinds.
+func renderSections(b *strings.Builder, changes []ChangeEntry, withPR bool, filter func(string) bool) {
+	for _, kind := range kindOrder {
+		if filter != nil && !filter(kind) {
+			continue
+		}
+		var entries []ChangeEntry
+		for _, c := range changes {
+			if c.Kind == kind {
+				entries = append(entries, c)
 			}
-			var badges []string
-			if c.Breaking {
-				badges = append(badges, "**BREAKING**")
-			}
-			if len(c.Categories) > 0 {
-				badges = append(badges, "["+strings.Join(c.Categories, ", ")+"]")
-			}
+		}
+		if len(entries) == 0 {
+			continue
+		}
+		fmt.Fprintf(b, "\n### %s\n", kindHeading[kind])
+		for _, e := range entries {
 			badge := ""
-			if len(badges) > 0 {
-				badge = " " + strings.Join(badges, " ")
+			if e.Breaking {
+				badge = " **BREAKING**"
 			}
 			pr := ""
-			if c.PR != nil {
-				pr = fmt.Sprintf(" (#%d)", *c.PR)
+			if withPR && e.PR != nil {
+				pr = fmt.Sprintf(" (#%d)", *e.PR)
 			}
-			fmt.Fprintf(&b, "- %s%s%s\n", c.Title.Text, badge, pr)
+			fmt.Fprintf(b, "- %s%s%s\n", e.Title, badge, pr)
 		}
 	}
-	b.WriteByte('\n')
+}
 
-	var allNotices []struct {
+// renderNotices writes a ### Notices section if any change has notices.
+func renderNotices(b *strings.Builder, changes []ChangeEntry) {
+	type pair struct {
 		change ChangeEntry
 		notice NoticeEntry
 	}
-	for _, c := range data.Changes {
+	var all []pair
+	for _, c := range changes {
 		for _, n := range c.Notices {
-			allNotices = append(allNotices, struct {
-				change ChangeEntry
-				notice NoticeEntry
-			}{c, n})
+			all = append(all, pair{c, n})
 		}
 	}
-	if len(allNotices) > 0 {
-		b.WriteString("### Notices\n\n")
-		for _, an := range allNotices {
-			fmt.Fprintf(&b, "- **%s**: %s\n", strings.ToUpper(an.notice.Level), an.notice.Message)
-		}
-		b.WriteByte('\n')
+	if len(all) == 0 {
+		return
 	}
+	b.WriteString("\n### Notices\n\n")
+	for _, p := range all {
+		fmt.Fprintf(b, "- **%s**: %s\n", strings.ToUpper(p.notice.Level), p.notice.Message)
+	}
+}
+
+// RenderChangelog produces a single CHANGELOG.md entry in KaC format.
+// It includes version header, kind sections (all kinds including chores), notices,
+// and reference links. No headline or contributors.
+func RenderChangelog(data *ReleaseData, githubRepo string) string {
+	var b strings.Builder
+
+	date := ""
+	if t, err := time.Parse(time.RFC3339, data.ReleasedAt); err == nil {
+		date = t.Format("2006-01-02")
+	}
+	fmt.Fprintf(&b, "## [%s] - %s\n", data.Tag, date)
+
+	renderSections(&b, data.Changes, true, nil)
+	renderNotices(&b, data.Changes)
+
+	if githubRepo != "" && data.PreviousVersion != nil && data.PreviousTag != "" {
+		fmt.Fprintf(&b, "\n**Full Changelog: [%s -> %s](https://github.com/%s/compare/%s...%s)**\n",
+			data.PreviousTag, data.Tag, githubRepo, data.PreviousTag, data.Tag)
+	}
+
+	return b.String()
+}
+
+// RenderNotes produces the GitHub Release body: headline (if any), user-facing
+// kind sections with PR links, notices, and a contributors footer.
+// Chores are excluded. maintainers (lowercased logins) and *[bot] accounts are
+// excluded from the contributors footer.
+func RenderNotes(data *ReleaseData, maintainers map[string]bool) string {
+	var b strings.Builder
+
+	if data.Headline != "" {
+		b.WriteString(data.Headline)
+		b.WriteString("\n\n")
+	}
+
+	renderSections(&b, data.Changes, true, isUserFacing)
+	renderNotices(&b, data.Changes)
 
 	var thanks []string
 	for _, u := range data.Contributors {
@@ -71,14 +121,7 @@ func RenderChangelog(data *ReleaseData, githubRepo string, maintainers map[strin
 		thanks = append(thanks, "@"+u)
 	}
 	if len(thanks) > 0 {
-		fmt.Fprintf(&b, "### Contributors\n\nThanks to %s for contributing to this release!\n\n", strings.Join(thanks, ", "))
-	}
-
-	if data.PreviousVersion != nil && githubRepo != "" {
-		fmt.Fprintf(&b,
-			"**Full Changelog: [%s -> %s](https://github.com/%s/compare/%s...%s)**\n\n",
-			*data.PreviousVersion, data.Tag, githubRepo, *data.PreviousVersion, data.Tag,
-		)
+		fmt.Fprintf(&b, "\n### Contributors\n\nThanks to %s for contributing to this release!\n", strings.Join(thanks, ", "))
 	}
 
 	return b.String()

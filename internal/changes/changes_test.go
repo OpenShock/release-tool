@@ -20,7 +20,6 @@ func writeChange(t *testing.T, dir, name, content string) {
 
 func TestRead_Empty(t *testing.T) {
 	dir := t.TempDir()
-	// No .changes directory at all.
 	ch, err := Read(dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -33,8 +32,7 @@ func TestRead_Empty(t *testing.T) {
 func TestRead_Valid(t *testing.T) {
 	dir := t.TempDir()
 	writeChange(t, dir, "my-feature.md", `---
-type: minor
-categories: [api, firmware]
+kind: added
 ---
 Add new endpoint
 
@@ -53,8 +51,11 @@ Short release note for consumers.
 		t.Fatalf("expected 1 change, got %d", len(ch))
 	}
 	c := ch[0]
+	if c.Kind != "added" {
+		t.Errorf("Kind: got %q", c.Kind)
+	}
 	if c.Bump != "minor" {
-		t.Errorf("Bump: got %q", c.Bump)
+		t.Errorf("Bump: got %q (added should derive minor)", c.Bump)
 	}
 	if c.Title != "Add new endpoint" {
 		t.Errorf("Title: got %q", c.Title)
@@ -65,11 +66,11 @@ Short release note for consumers.
 	if len(c.Notices) != 1 || c.Notices[0].Level != "warning" || c.Notices[0].Message != "requires firmware update" {
 		t.Errorf("Notices: got %+v", c.Notices)
 	}
-	if len(c.Categories) != 2 || c.Categories[0] != "api" || c.Categories[1] != "firmware" {
-		t.Errorf("Categories: got %v", c.Categories)
-	}
 	if c.Breaking {
-		t.Error("Breaking should be false for minor without explicit breaking:true")
+		t.Error("Breaking should be false when not set")
+	}
+	if c.Mandatory {
+		t.Error("Mandatory should be false when not set")
 	}
 	if c.Filename != "my-feature.md" {
 		t.Errorf("Filename: got %q", c.Filename)
@@ -78,9 +79,8 @@ Short release note for consumers.
 
 func TestRead_BreakingOverride(t *testing.T) {
 	dir := t.TempDir()
-	// minor type but explicitly marked breaking
 	writeChange(t, dir, "compat.md", `---
-type: minor
+kind: removed
 breaking: true
 ---
 Remove deprecated field
@@ -92,21 +92,57 @@ Remove deprecated field
 	if !ch[0].Breaking {
 		t.Error("expected Breaking=true")
 	}
+	if ch[0].Bump != "major" {
+		t.Errorf("expected Bump=major for breaking, got %q", ch[0].Bump)
+	}
 }
 
-func TestRead_MajorDefaultsBreaking(t *testing.T) {
+func TestRead_MandatoryField(t *testing.T) {
 	dir := t.TempDir()
-	writeChange(t, dir, "big.md", `---
-type: major
+	writeChange(t, dir, "must-visit.md", `---
+kind: changed
+mandatory: true
 ---
-Big change
+Config format changed
 `)
 	ch, err := Read(dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !ch[0].Breaking {
-		t.Error("expected Breaking=true for major type")
+	if !ch[0].Mandatory {
+		t.Error("expected Mandatory=true")
+	}
+}
+
+func TestRead_BumpDerivation(t *testing.T) {
+	cases := []struct {
+		kind     string
+		breaking bool
+		wantBump string
+	}{
+		{"fixed", false, "patch"},
+		{"security", false, "patch"},
+		{"added", false, "minor"},
+		{"changed", false, "minor"},
+		{"deprecated", false, "minor"},
+		{"removed", false, "minor"},
+		{"fixed", true, "major"},
+		{"added", true, "major"},
+	}
+	for _, tc := range cases {
+		dir := t.TempDir()
+		breaking := ""
+		if tc.breaking {
+			breaking = "\nbreaking: true"
+		}
+		writeChange(t, dir, "x.md", "---\nkind: "+tc.kind+breaking+"\n---\nTitle\n")
+		ch, err := Read(dir)
+		if err != nil {
+			t.Fatalf("%s breaking=%v: unexpected error: %v", tc.kind, tc.breaking, err)
+		}
+		if ch[0].Bump != tc.wantBump {
+			t.Errorf("%s breaking=%v: got Bump=%q, want %q", tc.kind, tc.breaking, ch[0].Bump, tc.wantBump)
+		}
 	}
 }
 
@@ -115,7 +151,7 @@ func TestRead_SkipsReadmeAndHeadline(t *testing.T) {
 	writeChange(t, dir, "README.md", "# readme")
 	writeChange(t, dir, "_headline.md", "Release headline")
 	writeChange(t, dir, "real.md", `---
-type: patch
+kind: fixed
 ---
 Fix typo
 `)
@@ -128,16 +164,16 @@ Fix typo
 	}
 }
 
-func TestRead_InvalidType(t *testing.T) {
+func TestRead_InvalidKind(t *testing.T) {
 	dir := t.TempDir()
 	writeChange(t, dir, "bad.md", `---
-type: hotfix
+kind: hotfix
 ---
 Something
 `)
 	_, err := Read(dir)
 	if err == nil {
-		t.Error("expected error for unknown type")
+		t.Error("expected error for unknown kind")
 	}
 }
 
@@ -153,7 +189,7 @@ func TestRead_MissingFrontmatter(t *testing.T) {
 func TestRead_MissingTitle(t *testing.T) {
 	dir := t.TempDir()
 	writeChange(t, dir, "notitle.md", `---
-type: patch
+kind: fixed
 ---
 `)
 	_, err := Read(dir)
@@ -165,12 +201,12 @@ type: patch
 func TestRead_MultipleChangesOrdered(t *testing.T) {
 	dir := t.TempDir()
 	writeChange(t, dir, "b-change.md", `---
-type: patch
+kind: fixed
 ---
 B change
 `)
 	writeChange(t, dir, "a-change.md", `---
-type: minor
+kind: added
 ---
 A change
 `)
@@ -181,7 +217,6 @@ A change
 	if len(ch) != 2 {
 		t.Fatalf("expected 2 changes, got %d", len(ch))
 	}
-	// Read sorts by filename alphabetically
 	if ch[0].Filename != "a-change.md" {
 		t.Errorf("expected a-change.md first, got %q", ch[0].Filename)
 	}
@@ -214,7 +249,7 @@ func TestChange_Slug(t *testing.T) {
 func TestRead_PRVerbatim(t *testing.T) {
 	dir := t.TempDir()
 	writeChange(t, dir, "pinned.md", `---
-type: patch
+kind: fixed
 pr: 123
 ---
 Fix with pinned PR
@@ -234,7 +269,7 @@ Fix with pinned PR
 func TestRead_PRExplicitNone(t *testing.T) {
 	dir := t.TempDir()
 	writeChange(t, dir, "nopr.md", `---
-type: patch
+kind: fixed
 pr: null
 ---
 Fix without a PR
@@ -254,7 +289,7 @@ Fix without a PR
 func TestRead_PRAbsent(t *testing.T) {
 	dir := t.TempDir()
 	writeChange(t, dir, "auto.md", `---
-type: patch
+kind: fixed
 ---
 Fix with derived PR
 `)
@@ -270,7 +305,7 @@ Fix with derived PR
 func TestRead_PRInvalid(t *testing.T) {
 	dir := t.TempDir()
 	writeChange(t, dir, "badpr.md", `---
-type: patch
+kind: fixed
 pr: not-a-number
 ---
 Fix
@@ -283,7 +318,7 @@ Fix
 func TestRead_InvalidNoticeLevel(t *testing.T) {
 	dir := t.TempDir()
 	writeChange(t, dir, "notice.md", `---
-type: patch
+kind: fixed
 ---
 Fix
 
@@ -298,7 +333,7 @@ Fix
 func TestRead_MalformedNotice(t *testing.T) {
 	dir := t.TempDir()
 	writeChange(t, dir, "notice.md", `---
-type: patch
+kind: fixed
 ---
 Fix
 
@@ -310,46 +345,13 @@ Fix
 	}
 }
 
-func TestRead_CategoryAllowlist(t *testing.T) {
-	dir := t.TempDir()
-	changesDir := filepath.Join(dir, Dir)
-	if err := os.MkdirAll(changesDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(changesDir, ConfigFile),
-		[]byte(`{"categories": ["api", "firmware"]}`), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	writeChange(t, dir, "ok.md", `---
-type: minor
-categories: [api]
----
-Allowed category
-`)
-	if _, err := Read(dir); err != nil {
-		t.Fatalf("allowed category should pass, got: %v", err)
-	}
-
-	writeChange(t, dir, "bad.md", `---
-type: minor
-categories: [typo]
----
-Unknown category
-`)
-	if _, err := Read(dir); err == nil {
-		t.Error("expected error for category outside the allowlist")
-	}
-}
-
 func TestReadSubset_SkipsMissing(t *testing.T) {
 	dir := t.TempDir()
 	writeChange(t, dir, "present.md", `---
-type: patch
+kind: fixed
 ---
 Present change
 `)
-	// "absent.md" was never written; it must be skipped, not error.
 	ch, err := ReadSubset(dir, []string{"present.md", "absent.md"})
 	if err != nil {
 		t.Fatalf("missing file should be skipped, got: %v", err)
@@ -362,31 +364,15 @@ Present change
 func TestReadSubset_BasenameGuard(t *testing.T) {
 	dir := t.TempDir()
 	writeChange(t, dir, "real.md", `---
-type: patch
+kind: fixed
 ---
 Real change
 `)
-	// A name with path separators must resolve to its basename within .changes/,
-	// never escape the directory.
 	ch, err := ReadSubset(dir, []string{"../../real.md"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(ch) != 1 || ch[0].Filename != "real.md" {
 		t.Errorf("expected basename-resolved real.md, got %+v", ch)
-	}
-}
-
-func TestRead_CategoryNoAllowlist(t *testing.T) {
-	dir := t.TempDir()
-	// No config.json: any category is accepted (pre-existing behavior).
-	writeChange(t, dir, "free.md", `---
-type: minor
-categories: [anything-goes]
----
-Freeform category
-`)
-	if _, err := Read(dir); err != nil {
-		t.Fatalf("category should be accepted without an allowlist, got: %v", err)
 	}
 }

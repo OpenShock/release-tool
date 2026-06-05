@@ -1,6 +1,5 @@
 ---
-type: minor
-categories: [ci]
+kind: added
 ---
 Action gains a status mode
 
