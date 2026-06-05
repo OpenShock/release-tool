@@ -1,7 +1,6 @@
 {
   "tag_prefix": "v",
   "branches": {
-    "alpha":  { "release": "prerelease", "label": "alpha" },
     "master": { "release": "stable" }
   }
 }
