@@ -210,6 +210,16 @@ func parseFile(path string) (*Change, error) {
 		return nil, fmt.Errorf("%s: title line is empty", filename)
 	}
 
+	var bodyLines int
+	for _, l := range strings.Split(changelogRaw, "\n") {
+		if strings.TrimSpace(l) != "" {
+			bodyLines++
+		}
+	}
+	if bodyLines > 1 {
+		return nil, fmt.Errorf("%s: only a single title line is allowed above sections, got %d lines", filename, bodyLines)
+	}
+
 	notices, err := parseNotices(noticesRaw)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", filename, err)

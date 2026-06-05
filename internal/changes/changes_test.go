@@ -186,6 +186,21 @@ func TestRead_MissingFrontmatter(t *testing.T) {
 	}
 }
 
+func TestRead_MultiLineTitleRejected(t *testing.T) {
+	dir := t.TempDir()
+	writeChange(t, dir, "multi.md", `---
+kind: fixed
+---
+Fix the thing
+
+- detail one
+- detail two
+`)
+	if _, err := Read(dir); err == nil {
+		t.Error("expected error for multi-line body above sections")
+	}
+}
+
 func TestRead_MissingTitle(t *testing.T) {
 	dir := t.TempDir()
 	writeChange(t, dir, "notitle.md", `---
