@@ -64,23 +64,39 @@ func TestRunCheck_SkipWhenNotReleaseBranch(t *testing.T) {
 	}
 }
 
+// gitExec runs git in root with a hermetic identity and returns trimmed stdout.
+func gitExec(t *testing.T, root string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		"GIT_CONFIG_NOSYSTEM=1", "HOME=/dev/null",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func gitInit(t *testing.T, root string) {
 	t.Helper()
-	run := func(args ...string) {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = root
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
-			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
-			"GIT_CONFIG_NOSYSTEM=1", "HOME=/dev/null",
-		)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
+	gitExec(t, root, "init", "-b", "master")
+	gitExec(t, root, "config", "commit.gpgsign", "false")
+	gitExec(t, root, "commit", "--allow-empty", "-m", "init")
+}
+
+// addChangeFile writes .changes/<name> and commits it, returning nothing; the
+// caller diffs against a previously captured ref.
+func addChangeFile(t *testing.T, root, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, ".changes", name), []byte(content), 0644); err != nil {
+		t.Fatal(err)
 	}
-	run("init", "-b", "master")
-	run("config", "commit.gpgsign", "false")
-	run("commit", "--allow-empty", "-m", "init")
+	gitExec(t, root, "add", filepath.Join(".changes", name))
+	gitExec(t, root, "commit", "-m", "add "+name)
 }
 
 func TestRunCheck_MissingWhenNoFilesAdded(t *testing.T) {
@@ -101,82 +117,63 @@ func TestRunCheck_MissingWhenNoFilesAdded(t *testing.T) {
 	}
 }
 
-func TestRunCheck_InvalidPRField_Number(t *testing.T) {
-	root := makeRepo(t, map[string]string{
-		"my-change.md": "---\nkind: fixed\npr: 42\n---\n\nSome change\n",
+func TestRunCheck_InvalidWhenPRFieldSet(t *testing.T) {
+	root := makeRepo(t, nil)
+	gitInit(t, root)
+	base := gitExec(t, root, "rev-parse", "HEAD")
+	addChangeFile(t, root, "my-change.md", "---\nkind: fixed\npr: 42\n---\nSome change\n")
+
+	v, err := RunCheck(CheckParams{
+		Root: root, BaseBranch: "master", Against: base, PR: 7, Config: releaseBranchConfig,
 	})
-
-	// Inject the parsed change directly by testing via ReadSubset path.
-	// We test RunCheck end-to-end by stubbing the git layer via Against="".
-	ch, err := changes.ReadSubset(root, []string{"my-change.md"})
 	if err != nil {
-		t.Fatalf("ReadSubset: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(ch) != 1 {
-		t.Fatalf("expected 1 change, got %d", len(ch))
+	if v.State != StateInvalid {
+		t.Errorf("expected invalid, got %q", v.State)
 	}
-	if ch[0].PR == nil {
-		t.Fatal("expected PR to be set (pr: 42), got nil")
+	if v.PR != 7 {
+		t.Errorf("PR should pass through, got %d", v.PR)
 	}
-
-	// Now verify the check logic rejects it via renderBody path
-	detail := ""
-	state := StateOK
-	for _, c := range ch {
-		if c.PR != nil || c.PRExplicitNone {
-			state = StateInvalid
-			detail += "  - " + c.Filename + ": pr field must not be set in a PR (it is assigned automatically at release time)\n"
-		}
-	}
-	if state != StateInvalid {
-		t.Error("expected StateInvalid for change with pr: 42")
-	}
-	if !strings.Contains(detail, "my-change.md") {
-		t.Errorf("expected filename in detail, got: %s", detail)
+	if !strings.Contains(v.Body, "pr field must not be set") || !strings.Contains(v.Body, "my-change.md") {
+		t.Errorf("body should explain the rejected pr field:\n%s", v.Body)
 	}
 }
 
-func TestRunCheck_InvalidPRField_Null(t *testing.T) {
-	root := makeRepo(t, map[string]string{
-		"suppress-pr.md": "---\nkind: fixed\npr: null\n---\n\nSome change\n",
+func TestRunCheck_InvalidWhenFileMalformed(t *testing.T) {
+	root := makeRepo(t, nil)
+	gitInit(t, root)
+	base := gitExec(t, root, "rev-parse", "HEAD")
+	addChangeFile(t, root, "bad.md", "---\nkind: fixed\n---\nTitle\n\n## Notices\n- warming: typo level\n")
+
+	v, err := RunCheck(CheckParams{
+		Root: root, BaseBranch: "master", Against: base, Config: releaseBranchConfig,
 	})
-
-	ch, err := changes.ReadSubset(root, []string{"suppress-pr.md"})
 	if err != nil {
-		t.Fatalf("ReadSubset: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(ch) != 1 {
-		t.Fatalf("expected 1 change, got %d", len(ch))
-	}
-	if !ch[0].PRExplicitNone {
-		t.Fatal("expected PRExplicitNone=true for pr: null")
-	}
-
-	state := StateOK
-	for _, c := range ch {
-		if c.PR != nil || c.PRExplicitNone {
-			state = StateInvalid
-		}
-	}
-	if state != StateInvalid {
-		t.Error("expected StateInvalid for change with pr: null")
+	if v.State != StateInvalid {
+		t.Errorf("expected invalid for a malformed notice, got %q", v.State)
 	}
 }
 
-func TestRunCheck_ValidChangeFile_NoPRField(t *testing.T) {
-	root := makeRepo(t, map[string]string{
-		"good-change.md": "---\nkind: added\n---\n\nA valid change\n",
-	})
+func TestRunCheck_OKForValidChangeFile(t *testing.T) {
+	root := makeRepo(t, nil)
+	gitInit(t, root)
+	base := gitExec(t, root, "rev-parse", "HEAD")
+	addChangeFile(t, root, "good-change.md", "---\nkind: added\n---\nA valid change\n")
 
-	ch, err := changes.ReadSubset(root, []string{"good-change.md"})
+	v, err := RunCheck(CheckParams{
+		Root: root, BaseBranch: "master", Against: base, Config: releaseBranchConfig,
+	})
 	if err != nil {
-		t.Fatalf("ReadSubset: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(ch) != 1 {
-		t.Fatalf("expected 1 change, got %d", len(ch))
+	if v.State != StateOK {
+		t.Errorf("expected ok, got %q (body: %s)", v.State, v.Body)
 	}
-	if ch[0].PR != nil || ch[0].PRExplicitNone {
-		t.Error("expected PR=nil and PRExplicitNone=false for change without pr field")
+	if !strings.Contains(v.Body, "**OK**") {
+		t.Errorf("body should report OK:\n%s", v.Body)
 	}
 }
 
@@ -201,5 +198,20 @@ func TestRenderCheckBody(t *testing.T) {
 		if !strings.Contains(body, c.wantStr) {
 			t.Errorf("%s: body missing %q in:\n%s", c.state, c.wantStr, body)
 		}
+	}
+}
+
+func TestRenderCheckBody_FenceContainsBacktickContent(t *testing.T) {
+	// Attacker-controlled content with a triple-backtick run must not be able to
+	// break out of the code fence in the privileged PR comment.
+	detail := "evil.md: ```\n## Injected heading\n![img](http://x)"
+	body := renderCheckBody(StateInvalid, 1, detail)
+	fence := safeFence(strings.TrimSpace(detail))
+	if len(fence) <= 3 {
+		t.Errorf("fence should be longer than the embedded backtick run, got %q", fence)
+	}
+	// The opening fence must be the longer fence, immediately followed by content.
+	if !strings.Contains(body, fence+"\n"+strings.TrimSpace(detail)) {
+		t.Errorf("content should be wrapped by a fence longer than its backtick run:\n%s", body)
 	}
 }

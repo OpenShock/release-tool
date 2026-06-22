@@ -207,3 +207,99 @@ func TestRenderNotes_NoContributorsSectionWhenAllFiltered(t *testing.T) {
 	}
 }
 
+// --- chore exclusion and section ordering ---
+
+func choreData() *ReleaseData {
+	return &ReleaseData{
+		Tag:        "v1.4.0",
+		ReleasedAt: "2026-06-05T00:00:00Z",
+		Changes: []ChangeEntry{
+			{Kind: "added", Title: "User feature", Notices: []NoticeEntry{}},
+			{Kind: "safety", Title: "E-stop hardening", Notices: []NoticeEntry{}},
+			{Kind: "chore", Title: "Bump dependency", Notices: []NoticeEntry{}},
+		},
+	}
+}
+
+func TestRenderChangelog_IncludesChores(t *testing.T) {
+	entry := RenderChangelog(choreData(), "")
+	if !strings.Contains(entry, "### Chores") {
+		t.Errorf("changelog should include a Chores section:\n%s", entry)
+	}
+	if !strings.Contains(entry, "Bump dependency") {
+		t.Errorf("changelog should include the chore entry:\n%s", entry)
+	}
+}
+
+func TestRenderNotes_ExcludesChores(t *testing.T) {
+	entry := RenderNotes(choreData(), nil)
+	if strings.Contains(entry, "### Chores") || strings.Contains(entry, "Bump dependency") {
+		t.Errorf("GitHub Release notes must exclude chores:\n%s", entry)
+	}
+	if !strings.Contains(entry, "User feature") {
+		t.Errorf("user-facing entries should still appear:\n%s", entry)
+	}
+}
+
+func TestRenderNotes_SafetyOrderedAfterUserFacingKinds(t *testing.T) {
+	entry := RenderNotes(choreData(), nil)
+	if !strings.Contains(entry, "### Safety") {
+		t.Fatalf("expected a Safety section:\n%s", entry)
+	}
+	if addedIdx, safetyIdx := strings.Index(entry, "### Added"), strings.Index(entry, "### Safety"); addedIdx > safetyIdx {
+		t.Errorf("expected Added before Safety:\n%s", entry)
+	}
+}
+
+// --- Release Note body (M3) ---
+
+func TestRenderNotes_IncludesReleaseNoteBody(t *testing.T) {
+	d := &ReleaseData{
+		Tag:        "v1.1.0",
+		ReleasedAt: "2026-01-01T00:00:00Z",
+		Changes: []ChangeEntry{
+			{
+				Kind:        "added",
+				Title:       "Technical title",
+				ReleaseNote: &ReleaseNoteEntry{Title: "User title", Description: []string{"Why it matters.", "How to use it."}},
+				Notices:     []NoticeEntry{},
+			},
+		},
+	}
+	entry := RenderNotes(d, nil)
+	if !strings.Contains(entry, "Why it matters.") || !strings.Contains(entry, "How to use it.") {
+		t.Errorf("release note description lines should appear in the GitHub Release body:\n%s", entry)
+	}
+}
+
+func TestRenderChangelog_OmitsReleaseNoteBody(t *testing.T) {
+	d := &ReleaseData{
+		Tag:        "v1.1.0",
+		ReleasedAt: "2026-01-01T00:00:00Z",
+		Changes: []ChangeEntry{
+			{
+				Kind:        "added",
+				Title:       "Technical title",
+				ReleaseNote: &ReleaseNoteEntry{Title: "User title", Description: []string{"Detail line."}},
+				Notices:     []NoticeEntry{},
+			},
+		},
+	}
+	entry := RenderChangelog(d, "")
+	if strings.Contains(entry, "Detail line.") {
+		t.Errorf("CHANGELOG should show the title only, not the release-note body:\n%s", entry)
+	}
+}
+
+func TestRenderChangelog_HeaderWithoutDate(t *testing.T) {
+	d := baseData()
+	d.ReleasedAt = "" // unparseable -> no date
+	entry := RenderChangelog(d, "")
+	if !strings.Contains(entry, "## [v1.3.0]\n") {
+		t.Errorf("expected header without a dangling separator:\n%s", entry)
+	}
+	if strings.Contains(entry, "v1.3.0] - \n") {
+		t.Errorf("header should not have a trailing ' - ':\n%s", entry)
+	}
+}
+

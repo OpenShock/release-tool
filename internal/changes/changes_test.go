@@ -122,12 +122,15 @@ func TestRead_BumpDerivation(t *testing.T) {
 	}{
 		{"fixed", false, "patch"},
 		{"security", false, "patch"},
+		{"safety", false, "patch"},
+		{"chore", false, "patch"},
 		{"added", false, "minor"},
 		{"changed", false, "minor"},
 		{"deprecated", false, "minor"},
 		{"removed", false, "minor"},
 		{"fixed", true, "major"},
 		{"added", true, "major"},
+		{"chore", true, "major"},
 	}
 	for _, tc := range cases {
 		dir := t.TempDir()
@@ -389,5 +392,103 @@ Real change
 	}
 	if len(ch) != 1 || ch[0].Filename != "real.md" {
 		t.Errorf("expected basename-resolved real.md, got %+v", ch)
+	}
+}
+
+func TestReadSubset_DedupesBasenames(t *testing.T) {
+	dir := t.TempDir()
+	writeChange(t, dir, "dup.md", `---
+kind: fixed
+---
+Only counted once
+`)
+	ch, err := ReadSubset(dir, []string{"dup.md", "dup.md", "sub/dup.md"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ch) != 1 {
+		t.Errorf("expected duplicate basenames to be read once, got %d", len(ch))
+	}
+}
+
+func TestRead_MultiLineReleaseNotePreserved(t *testing.T) {
+	dir := t.TempDir()
+	writeChange(t, dir, "note.md", `---
+kind: added
+---
+Technical title
+
+## Release Note
+User-facing title
+First detail line
+Second detail line
+`)
+	ch, err := Read(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ch[0].Title != "Technical title" {
+		t.Errorf("Title: got %q", ch[0].Title)
+	}
+	want := "User-facing title\nFirst detail line\nSecond detail line"
+	if ch[0].ReleaseNote != want {
+		t.Errorf("ReleaseNote: got %q, want %q", ch[0].ReleaseNote, want)
+	}
+}
+
+func TestRead_UnknownSectionRejected(t *testing.T) {
+	dir := t.TempDir()
+	writeChange(t, dir, "bad.md", `---
+kind: fixed
+---
+Title
+
+## Notice
+- info: typo'd heading (should be Notices)
+`)
+	if _, err := Read(dir); err == nil {
+		t.Error("expected error for an unknown ## section heading")
+	}
+}
+
+func TestRead_DuplicateSectionRejected(t *testing.T) {
+	dir := t.TempDir()
+	writeChange(t, dir, "dup.md", `---
+kind: fixed
+---
+Title
+
+## Notices
+- warning: first block
+
+## Notices
+- info: second block
+`)
+	if _, err := Read(dir); err == nil {
+		t.Error("expected error for a duplicate ## section heading")
+	}
+}
+
+func TestRead_PRNonPositiveRejected(t *testing.T) {
+	for _, v := range []string{"0", "-5"} {
+		dir := t.TempDir()
+		writeChange(t, dir, "pr.md", "---\nkind: fixed\npr: "+v+"\n---\nTitle\n")
+		if _, err := Read(dir); err == nil {
+			t.Errorf("pr: %s should be rejected", v)
+		}
+	}
+}
+
+func TestIsValidKind(t *testing.T) {
+	for _, k := range ValidKinds {
+		if !IsValidKind(k) {
+			t.Errorf("ValidKinds entry %q should be valid", k)
+		}
+	}
+	if IsValidKind("hotfix") {
+		t.Error("hotfix should not be a valid kind")
+	}
+	if KindList() == "" {
+		t.Error("KindList should be non-empty")
 	}
 }

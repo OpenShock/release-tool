@@ -1,6 +1,9 @@
 package release
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/OpenShock/release-tool/internal/changes"
@@ -215,5 +218,58 @@ func TestBuildData_Prerelease(t *testing.T) {
 	}
 	if data.Version != "1.0.0" {
 		t.Errorf("Version: got %q", data.Version)
+	}
+}
+
+func TestWriteJSON_RoundTrip(t *testing.T) {
+	data := BuildData(BuildParams{
+		Tag:        "v1.3.0",
+		Previous:   "1.2.0",
+		Version:    "1.3.0",
+		Commit:     "deadbeef",
+		Changes:    []*changes.Change{makeChange("added", "Add feature", false)},
+		EnrichPR:   false,
+		GithubRepo: "OpenShock/Firmware",
+	})
+
+	path := filepath.Join(t.TempDir(), "release.json")
+	if err := WriteJSON(path, data); err != nil {
+		t.Fatalf("WriteJSON: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	var got ReleaseData
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if got.SchemaVersion != schemaVersion {
+		t.Errorf("SchemaVersion: got %d, want %d", got.SchemaVersion, schemaVersion)
+	}
+	if got.Tag != "v1.3.0" || got.Version != "1.3.0" || got.Commit != "deadbeef" {
+		t.Errorf("core fields not preserved: %+v", got)
+	}
+	if got.Repository == nil || got.Repository.Owner != "OpenShock" || got.Repository.Repo != "Firmware" {
+		t.Errorf("Repository not preserved: %+v", got.Repository)
+	}
+	if len(got.Changes) != 1 || got.Changes[0].Title != "Add feature" {
+		t.Errorf("Changes not preserved: %+v", got.Changes)
+	}
+
+	// omitempty: no previous tag, headline, or PR set -> keys must be absent.
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"previous_tag", "headline"} {
+		if _, present := m[k]; present {
+			t.Errorf("%q should be omitted when unset", k)
+		}
+	}
+	if _, present := m["previous_version"]; !present {
+		t.Error("previous_version should be present when Previous is set")
 	}
 }
