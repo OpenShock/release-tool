@@ -83,6 +83,20 @@ func runPrerelease() error {
 		tag = fmt.Sprintf("%s%s-%s.%d", cfg.TagPrefix, base, prereleaseLabel, num+1)
 	}
 
+	// The SHA-based and label-less tags are deterministic from the commit, so a
+	// CI re-run on the same commit would recompute an existing tag. Detect that
+	// before writing any outputs and treat it as already-released, rather than
+	// failing at CreateTag after release.json/notes were already produced.
+	if !dryRun && !noTag {
+		if exists, err := git.TagExists(root, tag); err != nil {
+			return err
+		} else if exists {
+			fmt.Printf("Tag %s already exists, nothing to release.\n", tag)
+			writeGitHubOutputSkip()
+			return nil
+		}
+	}
+
 	commit, err := git.CurrentCommit(root)
 	if err != nil {
 		return err
