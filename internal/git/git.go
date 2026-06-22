@@ -91,6 +91,40 @@ func CreateTag(root, tag string) error {
 	return err
 }
 
+// TagExists reports whether tag already exists in the repo.
+func TagExists(root, tag string) (bool, error) {
+	cmd := exec.Command("git", "rev-parse", "-q", "--verify", "refs/tags/"+tag)
+	cmd.Dir = root
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("checking tag %q: %w", tag, err)
+}
+
+// IdentityConfigured reports whether a committer identity is resolvable from git
+// config or the standard environment overrides. The CLI never sets one itself
+// (only the workflow does), so a commit on an unconfigured machine would fail
+// after the working tree was already mutated.
+func IdentityConfigured(root string) bool {
+	name, _ := run(root, "config", "user.name")
+	email, _ := run(root, "config", "user.email")
+	hasName := name != "" || os.Getenv("GIT_AUTHOR_NAME") != "" || os.Getenv("GIT_COMMITTER_NAME") != ""
+	hasEmail := email != "" || os.Getenv("GIT_AUTHOR_EMAIL") != "" || os.Getenv("GIT_COMMITTER_EMAIL") != ""
+	return hasName && hasEmail
+}
+
+// ResetHard moves the current branch to ref and resets the index and working
+// tree to match, used to roll a release back to its starting commit after a
+// partial failure.
+func ResetHard(root, ref string) error {
+	_, err := run(root, "reset", "--hard", ref)
+	return err
+}
+
 func Add(root string, paths ...string) error {
 	_, err := run(root, append([]string{"add"}, paths...)...)
 	return err

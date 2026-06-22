@@ -73,6 +73,18 @@ func runRelease() error {
 		return enc.Encode(data)
 	}
 
+	// Pre-flight: fail before touching the working tree if the tag already
+	// exists or no committer identity is available, so a re-run can't half-apply
+	// a release and then leave it stranded with "No pending changes".
+	if exists, err := git.TagExists(root, tag); err != nil {
+		return err
+	} else if exists {
+		return fmt.Errorf("tag %s already exists; the release may have already been created", tag)
+	}
+	if !git.IdentityConfigured(root) {
+		return fmt.Errorf("no git committer identity configured; set user.name and user.email (or GIT_AUTHOR_*/GIT_COMMITTER_* env) before releasing")
+	}
+
 	if err := release.WriteJSON(output, data); err != nil {
 		return err
 	}
@@ -80,6 +92,19 @@ func runRelease() error {
 		if err := release.WriteNotes(notes, data, maintainers); err != nil {
 			return err
 		}
+	}
+
+	// Snapshot HEAD so any failure after this point can roll the working tree,
+	// index, and branch ref back to a clean pre-release state.
+	head, err := git.CurrentCommit(root)
+	if err != nil {
+		return err
+	}
+	rollback := func(cause error) error {
+		if rbErr := git.ResetHard(root, head); rbErr != nil {
+			return fmt.Errorf("%w (rollback to %s also failed: %v)", cause, head, rbErr)
+		}
+		return cause
 	}
 
 	changelogPath := filepath.Join(root, "CHANGELOG.md")
@@ -92,25 +117,37 @@ func runRelease() error {
 	}
 	fmt.Fprintln(os.Stderr, "Updated CHANGELOG.md")
 
+	// Remove consumed change files and stage exactly the paths we touched
+	// (CHANGELOG.md plus each removed file) so unrelated edits under .changes/
+	// are not swept into the release commit. A failed removal is fatal — a
+	// resurrected file would double-count on the next release.
+	staged := []string{"CHANGELOG.md"}
 	removed := 0
 	for _, c := range ch {
-		if err := os.Remove(filepath.Join(root, changes.Dir, c.Filename)); err == nil {
-			removed++
+		rel := filepath.Join(changes.Dir, c.Filename)
+		if err := os.Remove(filepath.Join(root, rel)); err != nil && !os.IsNotExist(err) {
+			return rollback(fmt.Errorf("removing %s: %w", rel, err))
 		}
+		staged = append(staged, rel)
+		removed++
 	}
-	if err := os.Remove(filepath.Join(root, changes.Dir, changes.HeadlineFile)); err == nil {
+	headlineRel := filepath.Join(changes.Dir, changes.HeadlineFile)
+	if err := os.Remove(filepath.Join(root, headlineRel)); err == nil {
+		staged = append(staged, headlineRel)
 		fmt.Fprintln(os.Stderr, "Removed .changes/_headline.md")
+	} else if !os.IsNotExist(err) {
+		return rollback(fmt.Errorf("removing %s: %w", headlineRel, err))
 	}
 	fmt.Fprintf(os.Stderr, "Removed %d change files\n", removed)
 
-	if err := git.Add(root, "CHANGELOG.md", changes.Dir); err != nil {
-		return err
+	if err := git.Add(root, staged...); err != nil {
+		return rollback(err)
 	}
 	if err := git.Commit(root, "chore: release "+tag); err != nil {
-		return err
+		return rollback(err)
 	}
 	if err := git.CreateTag(root, tag); err != nil {
-		return err
+		return rollback(err)
 	}
 	fmt.Fprintf(os.Stderr, "Created tag: %s\n", tag)
 	writeGitHubOutputs(tag, false)
