@@ -19,6 +19,19 @@ var (
 	rootDir         string
 )
 
+// releaseOptions is the resolved input to a single release/prerelease run. It is
+// built once from flags (and branch config) in each command's RunE and passed
+// down explicitly, so commands never mutate shared package globals to talk to
+// each other.
+type releaseOptions struct {
+	dryRun          bool
+	output          string
+	notes           string
+	prereleaseLabel string
+	gitSHA          bool
+	noTag           bool
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "release-tool",
 	Short: "OpenShock release tool - manages .changes files and versioned releases",
@@ -75,7 +88,7 @@ func writeGitHubOutputs(tag string, prerelease bool) {
 // commands: the literal previous tag (ref for the contributors compare) and the
 // maintainer exclusion set. Maintainers are fetched only outside dry-run, to
 // avoid network calls during previews.
-func enrichment(root string, cfg *changes.Config, latest string) (prevTag string, maintainers map[string]bool) {
+func enrichment(root string, cfg *changes.Config, latest string, dryRun bool) (prevTag string, maintainers map[string]bool) {
 	if latest != "" {
 		prevTag = cfg.TagPrefix + latest
 	}

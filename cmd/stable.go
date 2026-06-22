@@ -11,7 +11,7 @@ import (
 	"github.com/OpenShock/release-tool/internal/release"
 )
 
-func runRelease() error {
+func runRelease(opts releaseOptions) error {
 	root := projectRoot()
 
 	ch, err := changes.Read(root)
@@ -45,7 +45,7 @@ func runRelease() error {
 		return err
 	}
 
-	prevTag, maintainers := enrichment(root, cfg, latest)
+	prevTag, maintainers := enrichment(root, cfg, latest, opts.dryRun)
 
 	githubRepo := os.Getenv("GITHUB_REPOSITORY")
 
@@ -59,13 +59,13 @@ func runRelease() error {
 		Commit:      commit,
 		Version:     base,
 		Root:        root,
-		EnrichPR:    !dryRun,
+		EnrichPR:    !opts.dryRun,
 		GithubRepo: githubRepo,
 	})
 
 	entry := release.RenderChangelog(data, githubRepo)
 
-	if dryRun {
+	if opts.dryRun {
 		fmt.Fprintf(os.Stderr, "Would create tag: %s\n", tag)
 		fmt.Fprintf(os.Stderr, "\nChangelog entry:\n%s\n", entry)
 		enc := json.NewEncoder(os.Stdout)
@@ -85,11 +85,11 @@ func runRelease() error {
 		return fmt.Errorf("no git committer identity configured; set user.name and user.email (or GIT_AUTHOR_*/GIT_COMMITTER_* env) before releasing")
 	}
 
-	if err := release.WriteJSON(output, data); err != nil {
+	if err := release.WriteJSON(opts.output, data); err != nil {
 		return err
 	}
-	if notes != "" {
-		if err := release.WriteNotes(notes, data, maintainers); err != nil {
+	if opts.notes != "" {
+		if err := release.WriteNotes(opts.notes, data, maintainers); err != nil {
 			return err
 		}
 	}

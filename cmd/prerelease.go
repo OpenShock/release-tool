@@ -11,12 +11,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var noTag bool
-
 var prereleaseCmd = &cobra.Command{
 	Use:   "prerelease",
 	Short: "Create a prerelease tag from pending changes without consuming them",
-	RunE:  func(_ *cobra.Command, _ []string) error { return runPrerelease() },
+	RunE: func(_ *cobra.Command, _ []string) error {
+		return runPrerelease(releaseOptions{
+			dryRun:          dryRun,
+			output:          output,
+			notes:           notes,
+			prereleaseLabel: prereleaseLabel,
+			gitSHA:          gitSHA,
+		})
+	},
 }
 
 func init() {
@@ -28,7 +34,7 @@ func init() {
 	prereleaseCmd.Flags().BoolVar(&gitSHA, "git-sha", false, "Append git short SHA as build metadata (+g<sha>)")
 }
 
-func runPrerelease() error {
+func runPrerelease(opts releaseOptions) error {
 	root := projectRoot()
 
 	cfg, err := changes.ReadConfig(root)
@@ -68,26 +74,26 @@ func runPrerelease() error {
 
 	tag := cfg.TagPrefix + base
 	switch {
-	case prereleaseLabel != "" && gitSHA:
+	case opts.prereleaseLabel != "" && opts.gitSHA:
 		// SHA is the unique identifier — no .N counter, no tag lookup.
 		sha, err := git.ShortSHA(root)
 		if err != nil {
 			return err
 		}
-		tag = fmt.Sprintf("%s%s-%s+g%s", cfg.TagPrefix, base, prereleaseLabel, sha)
-	case prereleaseLabel != "":
-		num, err := git.LatestPrereleaseNumber(root, cfg.TagPrefix+base, prereleaseLabel)
+		tag = fmt.Sprintf("%s%s-%s+g%s", cfg.TagPrefix, base, opts.prereleaseLabel, sha)
+	case opts.prereleaseLabel != "":
+		num, err := git.LatestPrereleaseNumber(root, cfg.TagPrefix+base, opts.prereleaseLabel)
 		if err != nil {
 			return err
 		}
-		tag = fmt.Sprintf("%s%s-%s.%d", cfg.TagPrefix, base, prereleaseLabel, num+1)
+		tag = fmt.Sprintf("%s%s-%s.%d", cfg.TagPrefix, base, opts.prereleaseLabel, num+1)
 	}
 
 	// The SHA-based and label-less tags are deterministic from the commit, so a
 	// CI re-run on the same commit would recompute an existing tag. Detect that
 	// before writing any outputs and treat it as already-released, rather than
 	// failing at CreateTag after release.json/notes were already produced.
-	if !dryRun && !noTag {
+	if !opts.dryRun && !opts.noTag {
 		if exists, err := git.TagExists(root, tag); err != nil {
 			return err
 		} else if exists {
@@ -102,7 +108,7 @@ func runPrerelease() error {
 		return err
 	}
 
-	prevTag, maintainers := enrichment(root, cfg, latest)
+	prevTag, maintainers := enrichment(root, cfg, latest, opts.dryRun)
 
 	githubRepo := os.Getenv("GITHUB_REPOSITORY")
 
@@ -116,26 +122,26 @@ func runPrerelease() error {
 		Commit:      commit,
 		Version:     base,
 		Root:        root,
-		EnrichPR:    !dryRun,
+		EnrichPR:    !opts.dryRun,
 		GithubRepo: githubRepo,
 	})
 
-	if dryRun {
+	if opts.dryRun {
 		fmt.Fprintf(os.Stderr, "Would create tag: %s\n", tag)
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(data)
 	}
 
-	if err := release.WriteJSON(output, data); err != nil {
+	if err := release.WriteJSON(opts.output, data); err != nil {
 		return err
 	}
-	if notes != "" {
-		if err := release.WriteNotes(notes, data, maintainers); err != nil {
+	if opts.notes != "" {
+		if err := release.WriteNotes(opts.notes, data, maintainers); err != nil {
 			return err
 		}
 	}
-	if noTag {
+	if opts.noTag {
 		fmt.Fprintf(os.Stderr, "Version: %s (no tag)\n", tag)
 		writeGitHubOutputs("", true)
 		return nil
