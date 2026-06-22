@@ -20,6 +20,12 @@ func HighestBump(ch []*changes.Change) string {
 	return best
 }
 
+// versionRe matches a leading MAJOR.MINOR.PATCH. It deliberately prefix-matches:
+// any trailing suffix (a semver pre-release/build tag like "-rc.1", or stray
+// text) is ignored and only the numeric core is captured. ParseVersion is only
+// called on the stable-version capture from LatestStableTag, which is already
+// clean, so this leniency is never exercised on real input. The contract is
+// pinned by TestParseVersion.
 var versionRe = regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)`)
 
 func ParseVersion(s string) (maj, min, pat int, err error) {

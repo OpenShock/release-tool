@@ -44,6 +44,8 @@ func TestParseVersion(t *testing.T) {
 		{"0.0.0", 0, 0, 0, false},
 		{"10.20.30", 10, 20, 30, false},
 		{"1.2.3-rc.1", 1, 2, 3, false}, // prefix match - semver pre-release suffix is ignored
+		{"1.2.3foo", 1, 2, 3, false},   // prefix match - trailing text is ignored, not an error
+		{"1.2.3.4", 1, 2, 3, false},    // prefix match - only the first three components are captured
 		{"abc", 0, 0, 0, true},
 		{"1.2", 0, 0, 0, true},
 		{"", 0, 0, 0, true},
