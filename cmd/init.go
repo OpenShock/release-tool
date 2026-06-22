@@ -14,7 +14,6 @@ var (
 	initActionRef   string
 	initBranches    []string
 	initDevelop     []string
-	initCategories  []string
 	initTagPrefix   string
 	initNoWorkflows bool
 )
@@ -30,7 +29,6 @@ func init() {
 	initCmd.Flags().StringVar(&initActionRef, "action-ref", "OpenShock/release-tool@main", "Action ref to use in generated workflows (pin to a SHA for production)")
 	initCmd.Flags().StringSliceVar(&initBranches, "branches", []string{"master"}, "Release branches (stable first, then prerelease)")
 	initCmd.Flags().StringSliceVar(&initDevelop, "develop", nil, "Branches that build without tagging (release:none, sha:true)")
-	initCmd.Flags().StringSliceVar(&initCategories, "categories", nil, "Change file category allowlist (empty = any category allowed)")
 	initCmd.Flags().StringVar(&initTagPrefix, "tag-prefix", "", "Tag prefix (e.g. 'v')")
 	initCmd.Flags().BoolVar(&initNoWorkflows, "no-workflows", false, "Skip creating .github/workflows/ files")
 }
@@ -44,30 +42,35 @@ included in the next release.
 
 ` + "```" + `
 ---
-type: minor        # major | minor | patch
-breaking: false    # optional; major defaults to true
-categories: []     # optional list of labels
+kind: added       # added | changed | deprecated | removed | fixed | security | safety | chore
+breaking: false   # optional; true forces a major semver bump
+mandatory: false  # optional; true means this version must be installed before newer ones
 ---
-Title of the change (single line, required)
+Technical title (required, one line — appears in CHANGELOG and GitHub Release)
 
 ## Release Note
-Consumer-facing title line (required if section present)
-
-Optional longer explanation shown in release.json but not in CHANGELOG.md.
+User-facing title line (appears in release.json)
+Additional description lines shown in the GitHub Release and release.json.
 
 ## Notices
 - warning: something users must know before upgrading
 - info: optional note or migration step
 ` + "```" + `
 
+## Semver derivation
+
+- ` + "`" + `breaking: true` + "`" + ` -> major bump
+- ` + "`" + `kind: fixed|security|safety|chore` + "`" + ` -> patch bump
+- everything else -> minor bump
+
 ## File naming
 
 Name the file after the change (e.g. ` + "`" + `add-user-auth.md` + "`" + `).
-Run ` + "`" + `release-tool new "<title>" --type minor` + "`" + ` to generate one automatically.
+Run ` + "`" + `release-tool new "<title>" --kind added` + "`" + ` to generate one automatically.
 
 ## Special files
 
-- ` + "`" + `_headline.md` + "`" + ` - optional release headline shown at the top of the changelog entry
+- ` + "`" + `_headline.md` + "`" + ` - optional release headline shown at the top of the GitHub Release body
 `
 
 func writeIfMissing(path, content string) error {
@@ -93,12 +96,12 @@ func runInit(_ *cobra.Command, _ []string) error {
 	if err := writeIfMissing(filepath.Join(dir, "README.md"), changesReadme); err != nil {
 		return err
 	}
-	if err := writeIfMissing(filepath.Join(dir, "config.json"), buildConfigJSON(initTagPrefix, initCategories, initBranches, initDevelop)); err != nil {
+	if err := writeIfMissing(filepath.Join(dir, "config.json"), buildConfigJSON(initTagPrefix, initBranches, initDevelop)); err != nil {
 		return err
 	}
 
 	if !initNoWorkflows {
-		allBranches := append(initBranches, initDevelop...)
+		allBranches := append(append([]string{}, initBranches...), initDevelop...)
 		if err := writeWorkflows(root, initActionRef, allBranches); err != nil {
 			return err
 		}
@@ -107,7 +110,7 @@ func runInit(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-func buildConfigJSON(tagPrefix string, categories, branches, develop []string) string {
+func buildConfigJSON(tagPrefix string, branches, develop []string) string {
 	var branchEntries []string
 	for i, b := range branches {
 		var entry string
@@ -123,23 +126,13 @@ func buildConfigJSON(tagPrefix string, categories, branches, develop []string) s
 		branchEntries = append(branchEntries, entry)
 	}
 
-	cats := "[]"
-	if len(categories) > 0 {
-		quoted := make([]string, len(categories))
-		for i, c := range categories {
-			quoted[i] = fmt.Sprintf("%q", c)
-		}
-		cats = "[" + strings.Join(quoted, ", ") + "]"
-	}
-
 	return fmt.Sprintf(`{
   "tag_prefix": %q,
-  "categories": %s,
   "branches": {
 %s
   }
 }
-`, tagPrefix, cats, strings.Join(branchEntries, ",\n"))
+`, tagPrefix, strings.Join(branchEntries, ",\n"))
 }
 
 func writeWorkflows(root, actionRef string, branches []string) error {
@@ -148,13 +141,7 @@ func writeWorkflows(root, actionRef string, branches []string) error {
 		return fmt.Errorf("creating .github/workflows: %w", err)
 	}
 
-	branchList := `[` + strings.Join(func() []string {
-		out := make([]string, len(branches))
-		for i, b := range branches {
-			out[i] = b
-		}
-		return out
-	}(), ", ") + `]`
+	branchList := `[` + strings.Join(branches, ", ") + `]`
 
 	checkYML := fmt.Sprintf(`on:
   pull_request:
