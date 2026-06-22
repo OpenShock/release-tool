@@ -150,6 +150,7 @@ func ChangedChangeFilesSinceRef(root, ref string) ([]string, error) {
 		return nil, err
 	}
 	var files []string
+	seen := map[string]bool{}
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -160,6 +161,10 @@ func ChangedChangeFilesSinceRef(root, ref string) ([]string, error) {
 		if !strings.HasSuffix(lower, ".md") || lower == "readme.md" || lower == "_headline.md" {
 			continue
 		}
+		if seen[base] {
+			continue
+		}
+		seen[base] = true
 		files = append(files, base)
 	}
 	return files, nil

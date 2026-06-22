@@ -94,30 +94,55 @@ type rawFrontmatter struct {
 	PR yaml.Node `yaml:"pr"`
 }
 
-var validKinds = map[string]bool{
-	"added": true, "changed": true, "deprecated": true,
-	"removed": true, "fixed": true, "security": true,
-	"safety": true, "chore": true,
-}
+// ValidKinds is the canonical, ordered list of change kinds. It is the single
+// source of truth: the parser, the `new` command, and check messages all derive
+// from it so the accepted set and the human-readable list cannot drift apart.
+var ValidKinds = []string{"added", "changed", "deprecated", "removed", "fixed", "security", "safety", "chore"}
+
+var validKinds = func() map[string]bool {
+	m := make(map[string]bool, len(ValidKinds))
+	for _, k := range ValidKinds {
+		m[k] = true
+	}
+	return m
+}()
+
+// IsValidKind reports whether k is a recognised change kind.
+func IsValidKind(k string) bool { return validKinds[k] }
+
+// KindList renders the valid kinds as a `a|b|c` string for error and help text.
+func KindList() string { return strings.Join(ValidKinds, "|") }
 
 var knownSections = map[string]bool{
-	"## Release Note": true,
-	"## Notices":      true,
+	"release note": true,
+	"notices":      true,
 }
 
-func splitSections(body string) (changelog, releaseNote, notices string) {
+// splitSections partitions the body into the changelog title region and the
+// `## Release Note` / `## Notices` sections. Any `## ` heading that is not a
+// known section, or a known section that appears twice, is an error rather than
+// being silently swept into the title region or having its first block dropped.
+func splitSections(body string) (changelog, releaseNote, notices string, err error) {
 	sections := map[string][]string{"_changelog": {}}
 	current := "_changelog"
 	for _, line := range strings.Split(body, "\n") {
-		if knownSections[strings.TrimSpace(line)] {
-			current = strings.ToLower(strings.TrimSpace(line)[3:])
-			sections[current] = nil
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## ") {
+			key := strings.ToLower(strings.TrimSpace(trimmed[3:]))
+			if !knownSections[key] {
+				return "", "", "", fmt.Errorf("unknown section %q (expected `## Release Note` or `## Notices`)", trimmed)
+			}
+			if _, seen := sections[key]; seen {
+				return "", "", "", fmt.Errorf("duplicate section %q", trimmed)
+			}
+			sections[key] = nil
+			current = key
 			continue
 		}
 		sections[current] = append(sections[current], line)
 	}
 	join := func(k string) string { return strings.TrimSpace(strings.Join(sections[k], "\n")) }
-	return join("_changelog"), join("release note"), join("notices")
+	return join("_changelog"), join("release note"), join("notices"), nil
 }
 
 var validNoticeLevels = map[string]bool{"info": true, "warning": true, "error": true}
@@ -187,7 +212,7 @@ func parseFile(path string) (*Change, error) {
 	}
 
 	if !validKinds[fm.Kind] {
-		return nil, fmt.Errorf("%s: kind must be added|changed|deprecated|removed|fixed|security, got %q", filename, fm.Kind)
+		return nil, fmt.Errorf("%s: kind must be %s, got %q", filename, KindList(), fm.Kind)
 	}
 
 	breaking := false
@@ -200,7 +225,10 @@ func parseFile(path string) (*Change, error) {
 		mandatory = *fm.Mandatory
 	}
 
-	changelogRaw, releaseNote, noticesRaw := splitSections(strings.TrimSpace(string(m[2])))
+	changelogRaw, releaseNote, noticesRaw, err := splitSections(strings.TrimSpace(string(m[2])))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", filename, err)
+	}
 	if changelogRaw == "" {
 		return nil, fmt.Errorf("%s: missing title line", filename)
 	}
@@ -233,7 +261,10 @@ func parseFile(path string) (*Change, error) {
 		} else {
 			n, convErr := strconv.Atoi(strings.TrimSpace(fm.PR.Value))
 			if convErr != nil {
-				return nil, fmt.Errorf("%s: pr must be an integer or null, got %q", filename, fm.PR.Value)
+				return nil, fmt.Errorf("%s: pr must be a positive integer or null, got %q", filename, fm.PR.Value)
+			}
+			if n <= 0 {
+				return nil, fmt.Errorf("%s: pr must be a positive integer, got %d", filename, n)
 			}
 			prNum = &n
 		}
@@ -308,15 +339,24 @@ func Read(root string) ([]*Change, error) {
 
 // ReadSubset reads and parses only the named files (basenames) from .changes/.
 // Missing files are silently skipped. Names are reduced to their basename so a
-// caller cannot escape .changes/ via path separators.
+// caller cannot escape .changes/ via path separators, and duplicate basenames
+// (e.g. a file added, removed, then re-added across commits) are read once.
 func ReadSubset(root string, filenames []string) ([]*Change, error) {
-	sorted := make([]string, len(filenames))
-	copy(sorted, filenames)
-	sort.Strings(sorted)
+	bases := make([]string, 0, len(filenames))
+	seen := make(map[string]bool, len(filenames))
+	for _, name := range filenames {
+		base := filepath.Base(name)
+		if seen[base] {
+			continue
+		}
+		seen[base] = true
+		bases = append(bases, base)
+	}
+	sort.Strings(bases)
 
-	paths := make([]string, 0, len(sorted))
-	for _, name := range sorted {
-		paths = append(paths, filepath.Join(root, Dir, filepath.Base(name)))
+	paths := make([]string, 0, len(bases))
+	for _, base := range bases {
+		paths = append(paths, filepath.Join(root, Dir, base))
 	}
 
 	return parseAll(paths, true)

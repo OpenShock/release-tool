@@ -93,7 +93,7 @@ func renderCheckBody(state CheckState, count int, detail string) string {
 		fmt.Fprintf(&b, "✅ **OK** — %d valid change file(s) added in this PR.\n", count)
 	case StateMissing:
 		b.WriteString("⚠️ **Missing** — this PR does not add a change file under `.changes/`.\n\n")
-		b.WriteString("If this change should show up in the release notes, add one with `release-tool new \"<title>\" --kind <added|changed|deprecated|removed|fixed|security>`.\n")
+		fmt.Fprintf(&b, "If this change should show up in the release notes, add one with `release-tool new \"<title>\" --kind <%s>`.\n", changes.KindList())
 	case StateInvalid:
 		b.WriteString("❌ **Invalid format** — an added change file failed validation:\n\n")
 		fmt.Fprintf(&b, "```\n%s\n```\n", strings.TrimSpace(detail))

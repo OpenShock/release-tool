@@ -32,7 +32,7 @@ var newCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(newCmd)
-	newCmd.Flags().StringVarP(&newKind, "kind", "k", "", "Change kind: added, changed, deprecated, removed, fixed, security (required in CI)")
+	newCmd.Flags().StringVarP(&newKind, "kind", "k", "", "Change kind: "+changes.KindList()+" (required in CI)")
 	newCmd.Flags().BoolVarP(&newBreaking, "breaking", "b", false, "Mark as breaking change (major semver bump)")
 	newCmd.Flags().BoolVar(&newMandatory, "mandatory", false, "Mark as a mandatory version (must be installed before newer versions)")
 }
@@ -53,23 +53,12 @@ func slugify(title string) string {
 	return s
 }
 
-var validKinds = []string{"added", "changed", "deprecated", "removed", "fixed", "security", "safety", "chore"}
-
-func isValidKind(k string) bool {
-	for _, v := range validKinds {
-		if k == v {
-			return true
-		}
-	}
-	return false
-}
-
-func runNewCI(cmd *cobra.Command, args []string) error {
+func runNewCI(_ *cobra.Command, args []string) error {
 	if newKind == "" {
-		return fmt.Errorf("--kind is required in CI (added, changed, deprecated, removed, fixed, security)")
+		return fmt.Errorf("--kind is required in CI (%s)", changes.KindList())
 	}
-	if !isValidKind(newKind) {
-		return fmt.Errorf("invalid kind %q (must be added, changed, deprecated, removed, fixed, or security)", newKind)
+	if !changes.IsValidKind(newKind) {
+		return fmt.Errorf("invalid kind %q (must be %s)", newKind, changes.KindList())
 	}
 	title := ""
 	if len(args) > 0 {
@@ -126,25 +115,34 @@ func runNewInteractive(args []string) error {
 		return fmt.Errorf("title must not be empty")
 	}
 
-	if !breaking {
-		var wantBreaking bool
-		confirm := huh.NewForm(huh.NewGroup(
-			huh.NewConfirm().
+	if !breaking || !mandatory {
+		fields := []huh.Field{}
+		var wantBreaking, wantMandatory bool
+		if !breaking {
+			fields = append(fields, huh.NewConfirm().
 				Title("Mark as breaking?").
 				Value(&wantBreaking).
 				Affirmative("Yes").
-				Negative("No"),
-		))
-		_ = confirm.Run()
-		breaking = wantBreaking
+				Negative("No"))
+		}
+		if !mandatory {
+			fields = append(fields, huh.NewConfirm().
+				Title("Mark as mandatory? (must be installed before newer versions)").
+				Value(&wantMandatory).
+				Affirmative("Yes").
+				Negative("No"))
+		}
+		_ = huh.NewForm(huh.NewGroup(fields...)).Run()
+		breaking = breaking || wantBreaking
+		mandatory = mandatory || wantMandatory
 	}
 
 	return writeChangeFile(title, kind, breaking, mandatory)
 }
 
 func writeChangeFile(title, kind string, breaking, mandatory bool) error {
-	if !isValidKind(kind) {
-		return fmt.Errorf("kind must be added, changed, deprecated, removed, fixed, or security")
+	if !changes.IsValidKind(kind) {
+		return fmt.Errorf("kind must be one of %s", changes.KindList())
 	}
 
 	root := projectRoot()
