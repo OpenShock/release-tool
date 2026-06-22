@@ -4,6 +4,7 @@ on:
     paths-ignore:
       - 'CHANGELOG.md'
       - '.changes/**'
+  workflow_dispatch:
 
 name: release
 
