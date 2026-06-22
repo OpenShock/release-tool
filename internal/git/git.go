@@ -86,7 +86,12 @@ func CurrentCommit(root string) (string, error) {
 	return run(root, "rev-parse", "HEAD")
 }
 
+var safeTagRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/+-]*$`)
+
 func CreateTag(root, tag string) error {
+	if !safeTagRe.MatchString(tag) {
+		return fmt.Errorf("refusing to create tag with unsafe name %q", tag)
+	}
 	_, err := run(root, "tag", "-a", "-m", tag, tag)
 	return err
 }

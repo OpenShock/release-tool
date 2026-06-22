@@ -60,8 +60,11 @@ jobs:
       - name: Validate change files
         run: go run . status
 
+      # `release` dispatches on the current branch, which is only a real branch
+      # name (master) on push; PR checkouts are a detached merge ref.
       - name: Dry run stable
-        run: go run . --dry-run stable
+        if: github.event_name == 'push'
+        run: go run . release --root . --dry-run
 
       - name: Dry run prerelease
-        run: go run . --dry-run --prerelease-label alpha rc
+        run: go run . prerelease --root . --prerelease-label alpha --dry-run

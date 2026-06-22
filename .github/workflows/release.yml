@@ -48,7 +48,9 @@ jobs:
 
       - name: Push commit and tag
         if: steps.meta.outputs.tag != ''
-        run: git push origin HEAD "${{ steps.meta.outputs.tag }}"
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: git push --atomic origin HEAD "$TAG"
 
       - name: Build release binaries
         if: steps.meta.outputs.tag != ''

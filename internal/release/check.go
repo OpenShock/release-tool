@@ -96,9 +96,36 @@ func renderCheckBody(state CheckState, count int, detail string) string {
 		fmt.Fprintf(&b, "If this change should show up in the release notes, add one with `release-tool new \"<title>\" --kind <%s>`.\n", changes.KindList())
 	case StateInvalid:
 		b.WriteString("❌ **Invalid format** — an added change file failed validation:\n\n")
-		fmt.Fprintf(&b, "```\n%s\n```\n", strings.TrimSpace(detail))
+		// detail embeds attacker-controlled change-file content (filenames, YAML
+		// values) and is posted verbatim into a privileged PR comment. Use a
+		// fence longer than any backtick run inside it so the content cannot
+		// break out of the code block and inject markdown.
+		body := strings.TrimSpace(detail)
+		fence := safeFence(body)
+		fmt.Fprintf(&b, "%s\n%s\n%s\n", fence, body, fence)
 	}
 	return b.String()
+}
+
+// safeFence returns a run of backticks at least one longer than the longest
+// backtick run in content (minimum three), so content cannot terminate it.
+func safeFence(content string) string {
+	longest, cur := 0, 0
+	for _, r := range content {
+		if r == '`' {
+			cur++
+			if cur > longest {
+				longest = cur
+			}
+		} else {
+			cur = 0
+		}
+	}
+	n := longest + 1
+	if n < 3 {
+		n = 3
+	}
+	return strings.Repeat("`", n)
 }
 
 // WriteVerdict writes v as JSON for the comment stage to read from an artifact.

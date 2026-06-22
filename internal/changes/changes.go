@@ -39,6 +39,10 @@ type BranchConfig struct {
 type Config struct {
 	TagPrefix string                  `json:"tag_prefix"`
 	Branches  map[string]BranchConfig `json:"branches"`
+	// Maintainers are logins always excluded from the contributors footer,
+	// independent of the gh-derived collaborator set (which is unavailable when
+	// the token lacks collaborator-read, e.g. the default Actions token).
+	Maintainers []string `json:"maintainers,omitempty"`
 }
 
 func ReadConfig(root string) (*Config, error) {

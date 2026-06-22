@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/OpenShock/release-tool/internal/changes"
 	"github.com/OpenShock/release-tool/internal/git"
@@ -57,6 +58,7 @@ func writeGitHubOutputs(tag string, prerelease bool) {
 	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not open GITHUB_OUTPUT: %v\n", err)
 		return
 	}
 	defer f.Close()
@@ -64,7 +66,9 @@ func writeGitHubOutputs(tag string, prerelease bool) {
 	if prerelease {
 		pre = "true"
 	}
-	fmt.Fprintf(f, "tag=%s\nprerelease=%s\nskip=false\n", tag, pre)
+	if _, err := fmt.Fprintf(f, "tag=%s\nprerelease=%s\nskip=false\n", tag, pre); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not write GITHUB_OUTPUT: %v\n", err)
+	}
 }
 
 // enrichment derives the GitHub-enrichment inputs shared by the stable and rc
@@ -75,8 +79,16 @@ func enrichment(root string, cfg *changes.Config, latest string) (prevTag string
 	if latest != "" {
 		prevTag = cfg.TagPrefix + latest
 	}
+	// Always seed from the configured maintainer list so the footer excludes
+	// them even when gh can't return collaborators (the default-token case).
+	maintainers = map[string]bool{}
+	for _, m := range cfg.Maintainers {
+		maintainers[strings.ToLower(m)] = true
+	}
 	if !dryRun {
-		maintainers = git.Maintainers(root)
+		for m := range git.Maintainers(root) {
+			maintainers[m] = true
+		}
 	}
 	return prevTag, maintainers
 }
@@ -88,8 +100,11 @@ func writeGitHubOutputSkip() {
 	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not open GITHUB_OUTPUT: %v\n", err)
 		return
 	}
 	defer f.Close()
-	fmt.Fprintln(f, "skip=true")
+	if _, err := fmt.Fprintln(f, "skip=true"); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not write GITHUB_OUTPUT: %v\n", err)
+	}
 }

@@ -86,8 +86,11 @@ func writeCheckState(state release.CheckState) {
 	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not open GITHUB_OUTPUT: %v\n", err)
 		return
 	}
 	defer f.Close()
-	fmt.Fprintf(f, "state=%s\n", state)
+	if _, err := fmt.Fprintf(f, "state=%s\n", state); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not write GITHUB_OUTPUT: %v\n", err)
+	}
 }
