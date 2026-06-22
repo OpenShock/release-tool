@@ -140,6 +140,31 @@ func Commit(root, message string) error {
 	return err
 }
 
+// MergeRefBaseParent returns HEAD's first parent and true when HEAD is a merge
+// commit (two or more parents). A GitHub pull_request checkout uses the synthetic
+// refs/pull/N/merge ref, whose first parent is the base branch tip the PR is
+// being merged into — a more reliable base than the event's recorded base.sha,
+// which can lag on long-lived or reopened PRs. Returns ("", false) otherwise.
+func MergeRefBaseParent(root string) (string, bool) {
+	out, err := run(root, "rev-list", "--parents", "-n", "1", "HEAD")
+	if err != nil {
+		return "", false
+	}
+	// Output is "<commit> <parent1> <parent2> ..."; a merge has >= 2 parents.
+	fields := strings.Fields(out)
+	if len(fields) >= 3 {
+		return fields[1], true
+	}
+	return "", false
+}
+
+// IsAncestor reports whether a is an ancestor of b (true also when a == b).
+func IsAncestor(root, a, b string) bool {
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", a, b)
+	cmd.Dir = root
+	return cmd.Run() == nil
+}
+
 // ChangedChangeFilesSinceRef returns basenames of .changes/*.md files added
 // since ref (exclusive) up to HEAD. When ref is empty, the full history is
 // searched. Files matching readme.md or _headline.md are excluded.

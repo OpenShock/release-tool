@@ -177,6 +177,38 @@ func TestRunCheck_OKForValidChangeFile(t *testing.T) {
 	}
 }
 
+func TestRunCheck_StaleBaseIgnoresBaseAccruedFiles(t *testing.T) {
+	root := makeRepo(t, nil)
+	gitInit(t, root) // M0 — the PR's (soon to be stale) base
+	staleBase := gitExec(t, root, "rev-parse", "HEAD")
+
+	// The base branch accrues a new change file AFTER the PR's recorded base.
+	addChangeFile(t, root, "base-added.md", "---\nkind: added\n---\nBase feature\n")
+
+	// PR branch forks from the stale base and adds NO change file.
+	gitExec(t, root, "checkout", "-q", "-b", "pr", staleBase)
+	gitExec(t, root, "commit", "--allow-empty", "-m", "pr work")
+	prHead := gitExec(t, root, "rev-parse", "HEAD")
+
+	// Simulate GitHub's refs/pull/N/merge: master merged into the PR head, so
+	// HEAD is a merge whose first parent is the current base tip.
+	gitExec(t, root, "checkout", "-q", "master")
+	gitExec(t, root, "checkout", "-q", "-b", "mergeref")
+	gitExec(t, root, "merge", "--no-ff", "--no-edit", prHead)
+
+	// With the stale base the naive diff would count base-added.md and report OK;
+	// resolving to the merge-ref base parent must yield Missing.
+	v, err := RunCheck(CheckParams{
+		Root: root, BaseBranch: "master", Against: staleBase, Config: releaseBranchConfig,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v.State != StateMissing {
+		t.Errorf("expected Missing (PR adds no change file), got %q; body:\n%s", v.State, v.Body)
+	}
+}
+
 func TestRenderCheckBody(t *testing.T) {
 	cases := []struct {
 		state   CheckState

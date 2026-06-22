@@ -51,7 +51,19 @@ func RunCheck(p CheckParams) (Verdict, error) {
 		return Verdict{State: StateSkip, PR: p.PR}, nil
 	}
 
-	added, err := git.ChangedChangeFilesSinceRef(p.Root, p.Against)
+	// Resolve the ref to diff added change files against. On a pull_request
+	// merge-ref checkout, HEAD's first parent is the current base tip; prefer it
+	// when the caller's base (the event's base.sha) merely trails it, so a stale
+	// base on a long-lived or reopened PR doesn't make the diff pick up change
+	// files the base branch accrued since the PR was opened.
+	against := p.Against
+	if baseParent, ok := git.MergeRefBaseParent(p.Root); ok {
+		if against == "" || git.IsAncestor(p.Root, against, baseParent) {
+			against = baseParent
+		}
+	}
+
+	added, err := git.ChangedChangeFilesSinceRef(p.Root, against)
 	if err != nil {
 		return Verdict{}, err
 	}
