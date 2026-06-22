@@ -302,4 +302,3 @@ func TestRenderChangelog_HeaderWithoutDate(t *testing.T) {
 		t.Errorf("header should not have a trailing ' - ':\n%s", entry)
 	}
 }
-

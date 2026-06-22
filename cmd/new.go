@@ -13,8 +13,8 @@ import (
 )
 
 var (
-	newKind     string
-	newBreaking bool
+	newKind      string
+	newBreaking  bool
 	newMandatory bool
 )
 

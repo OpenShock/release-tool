@@ -67,7 +67,7 @@ type BuildParams struct {
 	Version     string
 	Root        string
 	EnrichPR    bool
-	GithubRepo string // e.g. "OpenShock/Firmware" from GITHUB_REPOSITORY
+	GithubRepo  string // e.g. "OpenShock/Firmware" from GITHUB_REPOSITORY
 }
 
 func parseRepository(githubRepo string) *Repository {
@@ -110,7 +110,7 @@ func BuildData(p BuildParams) *ReleaseData {
 		Prerelease:    p.Prerelease,
 		ReleasedAt:    time.Now().UTC().Truncate(time.Second).Format(time.RFC3339),
 		Commit:        p.Commit,
-		Headline: strings.TrimSpace(p.Headline),
+		Headline:      strings.TrimSpace(p.Headline),
 	}
 	if p.Previous != "" {
 		prev := p.Previous

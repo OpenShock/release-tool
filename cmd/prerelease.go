@@ -123,7 +123,7 @@ func runPrerelease(opts releaseOptions) error {
 		Version:     base,
 		Root:        root,
 		EnrichPR:    !opts.dryRun,
-		GithubRepo: githubRepo,
+		GithubRepo:  githubRepo,
 	})
 
 	if opts.dryRun {
