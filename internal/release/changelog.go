@@ -24,8 +24,10 @@ var kindHeading = map[string]string{
 func isUserFacing(kind string) bool { return kind != "chore" }
 
 // renderSections writes KaC-style ### Kind sections for the given kinds filter.
-// Pass nil to include all kinds.
-func renderSections(b *strings.Builder, changes []ChangeEntry, withPR bool, filter func(string) bool) {
+// Pass nil to include all kinds. When withReleaseNote is set, the authored
+// `## Release Note` description lines are rendered under each entry (used for
+// the GitHub Release body; the CHANGELOG intentionally shows the title only).
+func renderSections(b *strings.Builder, changes []ChangeEntry, withPR bool, filter func(string) bool, withReleaseNote bool) {
 	for _, kind := range kindOrder {
 		if filter != nil && !filter(kind) {
 			continue
@@ -50,6 +52,11 @@ func renderSections(b *strings.Builder, changes []ChangeEntry, withPR bool, filt
 				pr = fmt.Sprintf(" (#%d)", *e.PR)
 			}
 			fmt.Fprintf(b, "- %s%s%s\n", e.Title, badge, pr)
+			if withReleaseNote && e.ReleaseNote != nil {
+				for _, line := range e.ReleaseNote.Description {
+					fmt.Fprintf(b, "  %s\n", line)
+				}
+			}
 		}
 	}
 }
@@ -85,9 +92,13 @@ func RenderChangelog(data *ReleaseData, githubRepo string) string {
 	if t, err := time.Parse(time.RFC3339, data.ReleasedAt); err == nil {
 		date = t.Format("2006-01-02")
 	}
-	fmt.Fprintf(&b, "## [%s] - %s\n", data.Tag, date)
+	if date != "" {
+		fmt.Fprintf(&b, "## [%s] - %s\n", data.Tag, date)
+	} else {
+		fmt.Fprintf(&b, "## [%s]\n", data.Tag)
+	}
 
-	renderSections(&b, data.Changes, true, nil)
+	renderSections(&b, data.Changes, true, nil, false)
 	renderNotices(&b, data.Changes)
 
 	if githubRepo != "" && data.PreviousVersion != nil && data.PreviousTag != "" {
@@ -110,7 +121,7 @@ func RenderNotes(data *ReleaseData, maintainers map[string]bool) string {
 		b.WriteString("\n\n")
 	}
 
-	renderSections(&b, data.Changes, true, isUserFacing)
+	renderSections(&b, data.Changes, true, isUserFacing, true)
 	renderNotices(&b, data.Changes)
 
 	var thanks []string
