@@ -1,3 +1,10 @@
+## [v0.2.2] - 2026-06-25
+
+### Fixed
+- Use a normalized absolute path for the binary cache so the save step works for `uses: ./` self-invocation (github.action_path ends in `/.`, which actions/cache rejected as an invalid pattern, silently skipping the save) (#7)
+
+**Full Changelog: [v0.2.1 -> v0.2.2](https://github.com/OpenShock/release-tool/compare/v0.2.1...v0.2.2)**
+
 ## [v0.2.1] - 2026-06-25
 
 ### Fixed
