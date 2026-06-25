@@ -1,3 +1,10 @@
+## [v0.2.1] - 2026-06-25
+
+### Fixed
+- Cache the compiled binary keyed on a source content hash instead of recompiling via `go run .` every invocation; fixes the non-functional setup-go module cache (its cache-dependency-path sat outside GITHUB_WORKSPACE) and removes the per-run compile cost (#6)
+
+**Full Changelog: [v0.2.0 -> v0.2.1](https://github.com/OpenShock/release-tool/compare/v0.2.0...v0.2.1)**
+
 ## [v0.2.0] - 2026-06-25
 
 ### Added
