@@ -1,3 +1,10 @@
+## [v0.2.0] - 2026-06-25
+
+### Added
+- Expose the computed version as action outputs: `status` emits `next-version`, `previous-version`, and `bump`; `release`/`prerelease` emit `version` (set even on the no-tag path) (#5)
+
+**Full Changelog: [v0.1.0 -> v0.2.0](https://github.com/OpenShock/release-tool/compare/v0.1.0...v0.2.0)**
+
 ## [v0.1.0] - 2026-06-22
 
 ### Added
