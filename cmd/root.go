@@ -63,8 +63,10 @@ func projectRoot() string {
 	return root
 }
 
-// writeGitHubOutputs writes step outputs to GITHUB_OUTPUT if the env var is set.
-func writeGitHubOutputs(tag string, prerelease bool) {
+// appendGitHubOutput appends key=value step outputs to GITHUB_OUTPUT if the env
+// var is set. Values here are short, newline-free version/tag strings, so the
+// plain key=value form is sufficient (no heredoc delimiter needed).
+func appendGitHubOutput(outputs map[string]string) {
 	path := os.Getenv("GITHUB_OUTPUT")
 	if path == "" {
 		return
@@ -75,13 +77,41 @@ func writeGitHubOutputs(tag string, prerelease bool) {
 		return
 	}
 	defer f.Close()
+	for k, v := range outputs {
+		if _, err := fmt.Fprintf(f, "%s=%s\n", k, v); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not write GITHUB_OUTPUT: %v\n", err)
+			return
+		}
+	}
+}
+
+// writeGitHubOutputs writes the release/prerelease step outputs. version is the
+// full computed version string (the tag without prefix), exposed even on the
+// no-tag path where tag is empty; previous is the prior stable base version.
+func writeGitHubOutputs(tag, version, previous string, prerelease bool) {
 	pre := "false"
 	if prerelease {
 		pre = "true"
 	}
-	if _, err := fmt.Fprintf(f, "tag=%s\nprerelease=%s\nskip=false\n", tag, pre); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not write GITHUB_OUTPUT: %v\n", err)
-	}
+	appendGitHubOutput(map[string]string{
+		"tag":              tag,
+		"version":          version,
+		"previous-version": previous,
+		"prerelease":       pre,
+		"skip":             "false",
+	})
+}
+
+// writeStatusOutputs writes the status step outputs: the next base version
+// (MAJOR.MINOR.PATCH, no prerelease label), the prior stable base, and the
+// computed bump level. Works on any branch since it has no branch-config input.
+func writeStatusOutputs(nextVersion, previous, bump string) {
+	appendGitHubOutput(map[string]string{
+		"next-version":     nextVersion,
+		"previous-version": previous,
+		"bump":             bump,
+		"skip":             "false",
+	})
 }
 
 // enrichment derives the GitHub-enrichment inputs shared by the stable and rc
@@ -107,17 +137,5 @@ func enrichment(root string, cfg *changes.Config, latest string, dryRun bool) (p
 }
 
 func writeGitHubOutputSkip() {
-	path := os.Getenv("GITHUB_OUTPUT")
-	if path == "" {
-		return
-	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not open GITHUB_OUTPUT: %v\n", err)
-		return
-	}
-	defer f.Close()
-	if _, err := fmt.Fprintln(f, "skip=true"); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not write GITHUB_OUTPUT: %v\n", err)
-	}
+	appendGitHubOutput(map[string]string{"skip": "true"})
 }

@@ -48,6 +48,22 @@ outputs:
   tag:
     description: The tag that was created (empty when no tag was created)
     value: ${{ steps.run.outputs.tag }}
+  version:
+    description: >
+      release/prerelease mode: the full computed version string (the tag without
+      prefix), set even on the no-tag path where 'tag' is empty.
+    value: ${{ steps.run.outputs.version }}
+  next-version:
+    description: >
+      status mode: the next base version (MAJOR.MINOR.PATCH, no prerelease label).
+      Computed on any branch since status has no branch-config dependency.
+    value: ${{ steps.run.outputs.next-version }}
+  previous-version:
+    description: The prior stable base version (empty if there is no prior tag)
+    value: ${{ steps.run.outputs.previous-version }}
+  bump:
+    description: "status mode: the computed bump level (patch, minor, major)"
+    value: ${{ steps.run.outputs.bump }}
   prerelease:
     description: Whether the created tag is a prerelease
     value: ${{ steps.run.outputs.prerelease }}
