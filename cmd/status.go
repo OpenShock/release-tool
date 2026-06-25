@@ -29,6 +29,7 @@ func runStatus(_ *cobra.Command, _ []string) error {
 	}
 	if len(ch) == 0 {
 		fmt.Println("No pending changes.")
+		writeGitHubOutputSkip()
 		return nil
 	}
 
@@ -43,16 +44,16 @@ func runStatus(_ *cobra.Command, _ []string) error {
 	}
 	fmt.Printf("Latest stable tag: %s\n", orNone(latest))
 
+	// Use the same ComputeNext the release path uses, so the next version a
+	// consumer reads from status outputs matches what release would tag.
 	highest := release.HighestBump(ch)
-	if latest != "" {
-		maj, min, pat, err := release.ParseVersion(latest)
-		if err != nil {
-			return err
-		}
-		maj, min, pat = release.BumpVersion(maj, min, pat, highest)
-		fmt.Printf("Bump level:        %s\n", highest)
-		fmt.Printf("Next version:      %d.%d.%d\n", maj, min, pat)
+	next, err := release.ComputeNext(ch, latest)
+	if err != nil {
+		return err
 	}
+	fmt.Printf("Bump level:        %s\n", highest)
+	fmt.Printf("Next version:      %s\n", next)
+	writeStatusOutputs(next, latest, highest)
 	fmt.Println()
 
 	for _, c := range ch {

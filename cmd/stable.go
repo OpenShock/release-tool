@@ -150,6 +150,6 @@ func runRelease(opts releaseOptions) error {
 		return rollback(err)
 	}
 	fmt.Fprintf(os.Stderr, "Created tag: %s\n", tag)
-	writeGitHubOutputs(tag, false)
+	writeGitHubOutputs(tag, tag, latest, false)
 	return nil
 }

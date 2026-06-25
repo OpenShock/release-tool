@@ -143,13 +143,13 @@ func runPrerelease(opts releaseOptions) error {
 	}
 	if opts.noTag {
 		fmt.Fprintf(os.Stderr, "Version: %s (no tag)\n", tag)
-		writeGitHubOutputs("", true)
+		writeGitHubOutputs("", tag, latest, true)
 		return nil
 	}
 	if err := git.CreateTag(root, tag); err != nil {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "Created tag: %s\n", tag)
-	writeGitHubOutputs(tag, true)
+	writeGitHubOutputs(tag, tag, latest, true)
 	return nil
 }
