@@ -1,3 +1,10 @@
+## [v0.3.0] - 2026-07-08
+
+### Changed
+- Bump `actions/cache` from 4.3.0 to 6.1.0 in the github-actions dependency group
+
+**Full Changelog: [v0.2.2 -> v0.3.0](https://github.com/OpenShock/release-tool/compare/v0.2.2...v0.3.0)**
+
 ## [v0.2.2] - 2026-06-25
 
 ### Fixed
