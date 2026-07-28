@@ -118,6 +118,19 @@ runs:
         git config user.name  "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
 
+    # release mode tags the current commit, so it must be tagging the true
+    # tip (not one about to be superseded by a racing push), and previous/
+    # next version computation needs full tag history to be correct.
+    - name: Rebase on top of latest remote
+      if: inputs.mode == 'release'
+      shell: bash
+      run: git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+
+    - name: Fetch all tags
+      if: inputs.mode == 'release'
+      shell: bash
+      run: git fetch --tags
+
     - name: Run release tool
       id: run
       shell: bash
