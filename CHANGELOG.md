@@ -1,3 +1,10 @@
+## [v0.5.1] - 2026-07-28
+
+### Security
+- Bump OpenShock/actions publish-tag pin to v1.1.1 (code-injection fix)
+
+**Full Changelog: [v0.5.0 -> v0.5.1](https://github.com/OpenShock/release-tool/compare/v0.5.0...v0.5.1)**
+
 ## [v0.5.0] - 2026-07-28
 
 ### Changed
