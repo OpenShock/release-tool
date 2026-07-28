@@ -1,3 +1,14 @@
+## [v0.5.0] - 2026-07-28
+
+### Changed
+- Fold release-mode git prep (rebase + fetch tags) into the action itself (#12)
+
+### Notices
+
+- **INFO**: Workflows that were manually rebasing/fetching tags before calling release-tool in release mode can remove those now-redundant steps.
+
+**Full Changelog: [v0.4.0 -> v0.5.0](https://github.com/OpenShock/release-tool/compare/v0.4.0...v0.5.0)**
+
 ## [v0.3.0] - 2026-07-08
 
 ### Changed
