@@ -378,7 +378,7 @@ func TestBuildData_OrderedByCommitTimeAndPRFromSubject(t *testing.T) {
 		Changes: []*changes.Change{mk("alpha.md"), mk("new.md"), mk("zeta.md")},
 	})
 
-	order :=[]string{data.Changes[0].Title, data.Changes[1].Title, data.Changes[2].Title}
+	order := []string{data.Changes[0].Title, data.Changes[1].Title, data.Changes[2].Title}
 	want := []string{"zeta.md", "alpha.md", "new.md"}
 	for i := range want {
 		if order[i] != want[i] {
