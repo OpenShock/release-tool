@@ -302,3 +302,58 @@ func TestRenderChangelog_HeaderWithoutDate(t *testing.T) {
 		t.Errorf("header should not have a trailing ' - ':\n%s", entry)
 	}
 }
+
+func TestLinkRefs(t *testing.T) {
+	const repo = "OpenShock/Firmware"
+	cases := []struct{ in, want string }{
+		{"Fixes #12 and (#34)", "Fixes [#12](https://github.com/OpenShock/Firmware/issues/12) and ([#34](https://github.com/OpenShock/Firmware/issues/34))"},
+		{"#5 at start", "[#5](https://github.com/OpenShock/Firmware/issues/5) at start"},
+		{"already [#5](https://x) linked", "already [#5](https://x) linked"},
+		{"other/repo#9 and `#9` and abc#9", "other/repo#9 and `#9` and abc#9"},
+		{"#notanumber", "#notanumber"},
+	}
+	for _, c := range cases {
+		if got := linkRefs(c.in, repo); got != c.want {
+			t.Errorf("linkRefs(%q):\n got %q\nwant %q", c.in, got, c.want)
+		}
+	}
+	if got := linkRefs("see #3", ""); got != "see #3" {
+		t.Errorf("no repo should leave text unchanged, got %q", got)
+	}
+}
+
+func TestRenderNotes_LinksPRWhenRepoKnown(t *testing.T) {
+	d := baseData()
+	d.Repository = &Repository{Platform: "github", Owner: "OpenShock", Repo: "Firmware"}
+	d.Changes[0].PR = ptr(426)
+	notes := RenderNotes(d, nil)
+	if !strings.Contains(notes, "- Add new feature ([#426](https://github.com/OpenShock/Firmware/pull/426))") {
+		t.Errorf("expected linked PR in:\n%s", notes)
+	}
+}
+
+func TestRenderNotes_PlainPRWithoutRepo(t *testing.T) {
+	d := baseData()
+	d.Changes[0].PR = ptr(426)
+	notes := RenderNotes(d, nil)
+	if !strings.Contains(notes, "- Add new feature (#426)") {
+		t.Errorf("expected plain PR reference in:\n%s", notes)
+	}
+}
+
+func TestRenderNotes_SkipsListItemsInDescription(t *testing.T) {
+	d := baseData()
+	d.Changes[0].ReleaseNote = &ReleaseNoteEntry{
+		Title:       "User title",
+		Description: []string{"A prose sentence users care about.", "- internal detail", "* another detail", "1. numbered detail"},
+	}
+	notes := RenderNotes(d, nil)
+	if !strings.Contains(notes, "  A prose sentence users care about.") {
+		t.Errorf("prose description should be kept in:\n%s", notes)
+	}
+	for _, s := range []string{"internal detail", "another detail", "numbered detail"} {
+		if strings.Contains(notes, s) {
+			t.Errorf("list item %q should be left out of:\n%s", s, notes)
+		}
+	}
+}

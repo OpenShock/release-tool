@@ -2,7 +2,9 @@ package release
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -271,5 +273,125 @@ func TestWriteJSON_RoundTrip(t *testing.T) {
 	}
 	if _, present := m["previous_version"]; !present {
 		t.Error("previous_version should be present when Previous is set")
+	}
+}
+
+func TestBuildData_TitlePRSuffixMovesToPR(t *testing.T) {
+	data := BuildData(BuildParams{
+		Tag:     "1.0.0",
+		Changes: []*changes.Change{{Kind: "added", Bump: "minor", Title: "Add wizard (#426)", Filename: "w.md", Notices: []changes.Notice{}}},
+	})
+	e := data.Changes[0]
+	if e.Title != "Add wizard" {
+		t.Errorf("title suffix should be stripped, got %q", e.Title)
+	}
+	if e.PR == nil || *e.PR != 426 {
+		t.Errorf("expected PR=426 from title, got %v", e.PR)
+	}
+}
+
+func TestBuildData_TitlePRSuffixMatchingExplicitPR(t *testing.T) {
+	pr := 7
+	data := BuildData(BuildParams{
+		Tag:     "1.0.0",
+		Changes: []*changes.Change{{Kind: "fixed", Bump: "patch", Title: "Fix (#7)", Filename: "f.md", PR: &pr, Notices: []changes.Notice{}}},
+	})
+	if got := data.Changes[0].Title; got != "Fix" {
+		t.Errorf("duplicate (#7) should be stripped, got %q", got)
+	}
+}
+
+func TestBuildData_TitlePRSuffixKeptForExplicitNone(t *testing.T) {
+	data := BuildData(BuildParams{
+		Tag:     "1.0.0",
+		Changes: []*changes.Change{{Kind: "fixed", Bump: "patch", Title: "Fix (#7)", Filename: "f.md", PRExplicitNone: true, Notices: []changes.Notice{}}},
+	})
+	e := data.Changes[0]
+	if e.Title != "Fix (#7)" || e.PR != nil {
+		t.Errorf("explicit pr: null should keep the title as authored, got %q pr=%v", e.Title, e.PR)
+	}
+}
+
+func TestBuildData_BreakingFirst(t *testing.T) {
+	data := BuildData(BuildParams{
+		Tag: "2.0.0",
+		Changes: []*changes.Change{
+			makeChange("changed", "a-normal", false),
+			makeChange("changed", "b-breaking", true),
+		},
+	})
+	if data.Changes[0].Title != "b-breaking" {
+		t.Errorf("breaking change should sort first, got %q", data.Changes[0].Title)
+	}
+}
+
+// gitRepoWithChanges commits each name under .changes/ with the given subject at
+// the given unix time (in that order) and returns the repo root.
+func gitRepoWithChanges(t *testing.T, files []struct {
+	name, subject string
+	at            int64
+}) string {
+	t.Helper()
+	root := t.TempDir()
+	runGit := func(env []string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		cmd.Env = append(append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1"), env...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	runGit(nil, "init", "-b", "master")
+	runGit(nil, "config", "user.name", "test")
+	runGit(nil, "config", "user.email", "test@test.com")
+	runGit(nil, "config", "commit.gpgsign", "false")
+	if err := os.MkdirAll(filepath.Join(root, ".changes"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if err := os.WriteFile(filepath.Join(root, ".changes", f.name), []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		date := fmt.Sprintf("@%d +0000", f.at)
+		runGit(nil, "add", ".changes/"+f.name)
+		runGit([]string{"GIT_AUTHOR_DATE=" + date, "GIT_COMMITTER_DATE=" + date}, "commit", "-m", f.subject)
+	}
+	return root
+}
+
+func TestBuildData_OrderedByCommitTimeAndPRFromSubject(t *testing.T) {
+	root := gitRepoWithChanges(t, []struct {
+		name, subject string
+		at            int64
+	}{
+		{"zeta.md", "fix: older change (#12)", 1_700_000_000},
+		{"alpha.md", "Merge pull request #34 from someone/branch", 1_700_000_100},
+	})
+	mk := func(file string) *changes.Change {
+		return &changes.Change{Kind: "fixed", Bump: "patch", Title: file, Filename: file, Notices: []changes.Notice{}}
+	}
+	// Filename order (alpha before zeta) and uncommitted last.
+	data := BuildData(BuildParams{
+		Tag:     "1.0.1",
+		Root:    root,
+		Changes: []*changes.Change{mk("alpha.md"), mk("new.md"), mk("zeta.md")},
+	})
+
+	order :=[]string{data.Changes[0].Title, data.Changes[1].Title, data.Changes[2].Title}
+	want := []string{"zeta.md", "alpha.md", "new.md"}
+	for i := range want {
+		if order[i] != want[i] {
+			t.Fatalf("order: got %v, want %v", order, want)
+		}
+	}
+	if pr := data.Changes[0].PR; pr == nil || *pr != 12 {
+		t.Errorf("squash subject PR: got %v, want 12", pr)
+	}
+	if pr := data.Changes[1].PR; pr == nil || *pr != 34 {
+		t.Errorf("merge subject PR: got %v, want 34", pr)
+	}
+	if data.Changes[2].PR != nil {
+		t.Errorf("uncommitted file should have no PR, got %v", *data.Changes[2].PR)
 	}
 }

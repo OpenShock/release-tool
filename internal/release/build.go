@@ -3,7 +3,11 @@ package release
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -101,6 +105,26 @@ func releaseNote(text string) *ReleaseNoteEntry {
 	return entry
 }
 
+var titlePRSuffix = regexp.MustCompile(`\s*\(#(\d+)\)$`)
+
+// splitTitlePR strips a trailing "(#123)" from title and returns the number, so
+// the renderers can add the PR reference once (and linked) instead of twice.
+// Returns the title unchanged and 0 when there is no such suffix.
+func splitTitlePR(title string) (string, int) {
+	m := titlePRSuffix.FindStringSubmatchIndex(title)
+	if m == nil {
+		return title, 0
+	}
+	n, err := strconv.Atoi(title[m[2]:m[3]])
+	if err != nil {
+		return title, 0
+	}
+	return title[:m[0]], n
+}
+
+// uncommitted sorts change files that are not committed yet after all committed ones.
+const uncommitted = math.MaxInt64
+
 func BuildData(p BuildParams) *ReleaseData {
 	data := &ReleaseData{
 		SchemaVersion: schemaVersion,
@@ -120,6 +144,9 @@ func BuildData(p BuildParams) *ReleaseData {
 		data.PreviousTag = p.PreviousTag
 	}
 
+	// addedAt orders entries by when their change file was committed.
+	addedAt := make([]int64, 0, len(p.Changes))
+
 	for _, c := range p.Changes {
 		if c.Mandatory {
 			data.Mandatory = true
@@ -136,18 +163,64 @@ func BuildData(p BuildParams) *ReleaseData {
 		for i, n := range c.Notices {
 			entry.Notices[i] = NoticeEntry{Level: n.Level, Message: n.Message}
 		}
+
+		var origin git.ChangeFileOrigin
+		committed := false
+		if p.Root != "" {
+			origin, committed = git.ChangeFileAdded(p.Root, c.Filename)
+		}
+
+		// PR sources, most authoritative first. A "(#123)" written into the
+		// title is moved into PR so it is not rendered twice.
+		title, titlePR := splitTitlePR(c.Title)
 		switch {
 		case c.PRExplicitNone:
-			// explicit `pr: null` suppresses the PR link
+			// explicit `pr: null` suppresses the PR link; keep the title as authored
 		case c.PR != nil:
 			pr := *c.PR
 			entry.PR = &pr
-		case p.EnrichPR:
-			if n := git.DerivePRNumber(p.Root, c.Filename); n != 0 {
+			if titlePR == pr {
+				entry.Title = title
+			}
+		case titlePR != 0:
+			entry.Title = title
+			entry.PR = &titlePR
+		case committed && git.PRFromSubject(origin.Subject) != 0:
+			n := git.PRFromSubject(origin.Subject)
+			entry.PR = &n
+		case p.EnrichPR && committed:
+			if n := git.PRForCommit(p.Root, origin.SHA); n != 0 {
 				entry.PR = &n
 			}
 		}
+
 		data.Changes = append(data.Changes, entry)
+		if committed {
+			addedAt = append(addedAt, origin.Time)
+		} else {
+			addedAt = append(addedAt, uncommitted)
+		}
+	}
+
+	// Breaking changes first, then in the order they were committed. Ties (and
+	// all entries when there is no git history) keep the filename order.
+	order := make([]int, len(data.Changes))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool {
+		ea, eb := data.Changes[order[a]], data.Changes[order[b]]
+		if ea.Breaking != eb.Breaking {
+			return ea.Breaking
+		}
+		return addedAt[order[a]] < addedAt[order[b]]
+	})
+	if len(order) > 1 {
+		sorted := make([]ChangeEntry, len(order))
+		for i, idx := range order {
+			sorted[i] = data.Changes[idx]
+		}
+		data.Changes = sorted
 	}
 
 	data.Contributors = []string{}

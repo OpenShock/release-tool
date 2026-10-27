@@ -209,3 +209,39 @@ func TestIdentityConfigured(t *testing.T) {
 		t.Error("repo with local user.name/user.email should report identity configured")
 	}
 }
+
+func TestPRFromSubject(t *testing.T) {
+	cases := map[string]int{
+		"fix: something (#123)":                      123,
+		"feat: thing (#7)  ":                         7,
+		"Merge pull request #45 from user/branch":    45,
+		"fix: mentions #9 in the middle":             0,
+		"chore: no pr":                               0,
+		"fix(wifi): report connected network (#515)": 515,
+	}
+	for subject, want := range cases {
+		if got := PRFromSubject(subject); got != want {
+			t.Errorf("PRFromSubject(%q) = %d, want %d", subject, got, want)
+		}
+	}
+}
+
+func TestChangeFileAdded(t *testing.T) {
+	root := newRepo(t)
+	if err := os.MkdirAll(filepath.Join(root, ".changes"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	commitFile(t, root, ".changes/x.md", "x")
+
+	origin, ok := ChangeFileAdded(root, "x.md")
+	if !ok {
+		t.Fatal("expected committed change file to be found")
+	}
+	if origin.SHA == "" || origin.Time == 0 || origin.Subject != "add .changes/x.md" {
+		t.Errorf("unexpected origin: %+v", origin)
+	}
+
+	if _, ok := ChangeFileAdded(root, "missing.md"); ok {
+		t.Error("uncommitted change file should report ok=false")
+	}
+}

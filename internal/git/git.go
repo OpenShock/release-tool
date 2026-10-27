@@ -272,11 +272,54 @@ func Maintainers(root string) map[string]bool {
 	return set
 }
 
-// DerivePRNumber finds the PR that introduced .changes/<filename> via gh api.
+// ChangeFileOrigin is the commit that added a change file.
+type ChangeFileOrigin struct {
+	SHA     string
+	Time    int64 // committer time, unix seconds
+	Subject string
+}
+
+// ChangeFileAdded returns the most recent commit that added .changes/<filename>.
+// ok is false when the file has not been committed yet (or git fails).
+func ChangeFileAdded(root, filename string) (origin ChangeFileOrigin, ok bool) {
+	out, err := run(root, "log", "--diff-filter=A", "--format=%H%x1f%ct%x1f%s", "-n", "1", "--", ".changes/"+filename)
+	if err != nil || out == "" {
+		return ChangeFileOrigin{}, false
+	}
+	parts := strings.SplitN(out, "\x1f", 3)
+	if len(parts) != 3 {
+		return ChangeFileOrigin{}, false
+	}
+	t, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return ChangeFileOrigin{}, false
+	}
+	return ChangeFileOrigin{SHA: parts[0], Time: t, Subject: parts[2]}, true
+}
+
+var (
+	squashSubjectPR = regexp.MustCompile(`\(#(\d+)\)\s*$`)
+	mergeSubjectPR  = regexp.MustCompile(`^Merge pull request #(\d+)\b`)
+)
+
+// PRFromSubject extracts the PR number from a squash-merge subject ("... (#123)")
+// or a merge-commit subject ("Merge pull request #123 from ..."). Returns 0 when
+// the subject names no PR. Works offline, unlike PRForCommit.
+func PRFromSubject(subject string) int {
+	for _, re := range []*regexp.Regexp{squashSubjectPR, mergeSubjectPR} {
+		if m := re.FindStringSubmatch(subject); m != nil {
+			if n, err := strconv.Atoi(m[1]); err == nil {
+				return n
+			}
+		}
+	}
+	return 0
+}
+
+// PRForCommit finds the PR associated with commit sha via gh api.
 // Returns 0 if gh is unavailable or the commit has no associated PR.
-func DerivePRNumber(root, filename string) int {
-	sha, err := run(root, "log", "--diff-filter=A", "--format=%H", "-n", "1", "--", ".changes/"+filename)
-	if err != nil || sha == "" {
+func PRForCommit(root, sha string) int {
+	if sha == "" {
 		return 0
 	}
 	out, err := ghAPI(root, fmt.Sprintf("repos/{owner}/{repo}/commits/%s/pulls", sha))

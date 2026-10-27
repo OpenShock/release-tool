@@ -273,11 +273,17 @@ Plain-language note for end users. Included in release.json, not in CHANGELOG.md
 **`pr` field** — do not set this in a PR. It is assigned automatically at release time from git history. Setting it (to a number or `null`) will cause the PR check to fail.
 
 At release time, `pr` is tri-state:
-- **absent**: derived from git log
+- **absent**: derived, in order, from a trailing `(#123)` in the title (which is then stripped so it isn't shown twice), the subject of the commit that added the change file (`... (#123)` or `Merge pull request #123 ...`, works offline and in `--dry-run`), and finally the GitHub API
 - **integer** (`pr: 123`): used verbatim
 - **`pr: null`**: PR link suppressed
 
 Notice levels must be `info`, `warning`, or `error`.
+
+### How the release body is rendered
+
+- Within each kind section, breaking changes come first, then entries in the order their change files were committed (uncommitted files last).
+- Markdown list items in a `## Release Note` description are left out of the GitHub Release body to keep it scannable; prose lines are kept. `release.json` always carries the full description.
+- When the repository is known (`GITHUB_REPOSITORY`), PR references and bare `#123` mentions are rendered as links in the release body and in `CHANGELOG.md`.
 
 ## CLI reference
 

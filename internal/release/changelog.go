@@ -2,6 +2,7 @@ package release
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -23,11 +24,47 @@ var kindHeading = map[string]string{
 // Chores are developer-internal and excluded from user-facing outputs.
 func isUserFacing(kind string) bool { return kind != "chore" }
 
+// issueRef matches a bare "#123" that starts a line or follows whitespace or
+// opening punctuation, so "owner/repo#1", "[#1](...)" and "`#1`" are left alone.
+var issueRef = regexp.MustCompile(`(^|[\s(,;:])#(\d+)\b`)
+
+// linkRefs turns bare "#123" references into markdown links when the
+// repository is known ("owner/repo"); otherwise it returns text unchanged.
+// /issues/ is used because GitHub redirects it to the PR when the number is one.
+func linkRefs(text, repo string) string {
+	if repo == "" {
+		return text
+	}
+	return issueRef.ReplaceAllString(text, "${1}[#${2}](https://github.com/"+repo+"/issues/${2})")
+}
+
+// prRef renders the " (#123)" suffix for an entry, linked when repo is known.
+func prRef(pr int, repo string) string {
+	if repo == "" {
+		return fmt.Sprintf(" (#%d)", pr)
+	}
+	return fmt.Sprintf(" ([#%d](https://github.com/%s/pull/%d))", pr, repo, pr)
+}
+
+// listItem matches markdown list lines ("- x", "* x", "+ x", "1. x").
+var listItem = regexp.MustCompile(`^([-*+]|\d+[.)])\s+`)
+
+// repoSlug returns "owner/repo" for data's repository, or "" when unknown.
+func repoSlug(r *Repository) string {
+	if r == nil || r.Owner == "" || r.Repo == "" {
+		return ""
+	}
+	return r.Owner + "/" + r.Repo
+}
+
 // renderSections writes KaC-style ### Kind sections for the given kinds filter.
 // Pass nil to include all kinds. When withReleaseNote is set, the authored
 // `## Release Note` description lines are rendered under each entry (used for
 // the GitHub Release body; the CHANGELOG intentionally shows the title only).
-func renderSections(b *strings.Builder, changes []ChangeEntry, withPR bool, filter func(string) bool, withReleaseNote bool) {
+// List items in the description are left out there: they tend to be
+// implementation detail and make the release body hard to scan. release.json
+// still carries them. repo ("owner/repo", may be empty) enables links.
+func renderSections(b *strings.Builder, changes []ChangeEntry, withPR bool, filter func(string) bool, withReleaseNote bool, repo string) {
 	for _, kind := range kindOrder {
 		if filter != nil && !filter(kind) {
 			continue
@@ -49,12 +86,15 @@ func renderSections(b *strings.Builder, changes []ChangeEntry, withPR bool, filt
 			}
 			pr := ""
 			if withPR && e.PR != nil {
-				pr = fmt.Sprintf(" (#%d)", *e.PR)
+				pr = prRef(*e.PR, repo)
 			}
-			fmt.Fprintf(b, "- %s%s%s\n", e.Title, badge, pr)
+			fmt.Fprintf(b, "- %s%s%s\n", linkRefs(e.Title, repo), badge, pr)
 			if withReleaseNote && e.ReleaseNote != nil {
 				for _, line := range e.ReleaseNote.Description {
-					fmt.Fprintf(b, "  %s\n", line)
+					if listItem.MatchString(line) {
+						continue
+					}
+					fmt.Fprintf(b, "  %s\n", linkRefs(line, repo))
 				}
 			}
 		}
@@ -98,7 +138,7 @@ func RenderChangelog(data *ReleaseData, githubRepo string) string {
 		fmt.Fprintf(&b, "## [%s]\n", data.Tag)
 	}
 
-	renderSections(&b, data.Changes, true, nil, false)
+	renderSections(&b, data.Changes, true, nil, false, githubRepo)
 	renderNotices(&b, data.Changes)
 
 	if githubRepo != "" && data.PreviousVersion != nil && data.PreviousTag != "" {
@@ -121,7 +161,7 @@ func RenderNotes(data *ReleaseData, maintainers map[string]bool) string {
 		b.WriteString("\n\n")
 	}
 
-	renderSections(&b, data.Changes, true, isUserFacing, true)
+	renderSections(&b, data.Changes, true, isUserFacing, true, repoSlug(data.Repository))
 	renderNotices(&b, data.Changes)
 
 	var thanks []string
