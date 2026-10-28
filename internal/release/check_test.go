@@ -179,7 +179,7 @@ func TestRunCheck_OKForValidChangeFile(t *testing.T) {
 
 func TestRunCheck_StaleBaseIgnoresBaseAccruedFiles(t *testing.T) {
 	root := makeRepo(t, nil)
-	gitInit(t, root) // M0 — the PR's (soon to be stale) base
+	gitInit(t, root) // M0: the PR's (soon to be stale) base
 	staleBase := gitExec(t, root, "rev-parse", "HEAD")
 
 	// The base branch accrues a new change file AFTER the PR's recorded base.

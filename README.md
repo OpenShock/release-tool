@@ -1,6 +1,6 @@
 # release-tool
 
-`release-tool` automates semver releases driven by change files in `.changes/`. It reads per-branch config to decide whether a push should produce a stable release, a prerelease tag, or a no-tag build artifact — all from one `release` command that CI calls the same way on every branch.
+`release-tool` automates semver releases driven by change files in `.changes/`. It reads per-branch config to decide whether a push should produce a stable release, a prerelease tag, or a no-tag build artifact, all from one `release` command that CI calls the same way on every branch.
 
 ## Install
 
@@ -63,8 +63,8 @@ When a push lands on a configured branch, `release-tool release` reads the branc
 | `release` value | Behaviour |
 |---|---|
 | `stable` | Computes next semver, writes `CHANGELOG.md`, moves consumed change files to `.changes/released/<version>/`, commits, creates tag |
-| `prerelease` | Computes next semver + label (e.g. `1.2.0-beta.3`), writes release data, creates tag — change files stay |
-| `none` | Computes version with SHA metadata (e.g. `1.2.0-develop+gabc123`), writes release data — **no git tag, no changelog** |
+| `prerelease` | Computes next semver + label (e.g. `1.2.0-beta.3`), writes release data, creates tag; change files stay |
+| `none` | Computes version with SHA metadata (e.g. `1.2.0-develop+gabc123`), writes release data, **no git tag, no changelog** |
 
 If there are no change files since the last stable tag, the tool exits with `skip=true` and does nothing.
 
@@ -111,7 +111,7 @@ jobs:
       - uses: actions/checkout@<sha> # v6
         with:
           fetch-depth: 0
-          token: ${{ secrets.RELEASE_TOKEN }}   # PAT required — see below
+          token: ${{ secrets.RELEASE_TOKEN }}   # PAT required, see below
 
       - name: Configure git
         run: |
@@ -152,7 +152,7 @@ jobs:
 
 Run `release-tool init` to generate both workflow files automatically, or add them manually:
 
-**`.github/workflows/check-changes.yml`** — runs on `pull_request` with read-only permissions (fork-safe):
+**`.github/workflows/check-changes.yml`**: runs on `pull_request` with read-only permissions (fork-safe):
 
 ```yaml
 on:
@@ -192,7 +192,7 @@ jobs:
           if-no-files-found: warn
 ```
 
-**`.github/workflows/pr-check-comment.yml`** — runs on `workflow_run` with write permissions, never executes fork code:
+**`.github/workflows/pr-check-comment.yml`**: runs on `workflow_run` with write permissions, never executes fork code:
 
 ```yaml
 on:
@@ -354,7 +354,7 @@ release-tool init \
   --no-workflows                 # skip .github/workflows/ generation
 ```
 
-Idempotent — skips files that already exist.
+Idempotent: skips files that already exist.
 
 ### `new`
 
@@ -425,6 +425,6 @@ Outputs: `tag`, `prerelease`, `skip`.
 When `GITHUB_TOKEN` is set with sufficient permissions, the tool enriches releases with GitHub data:
 
 - **PR numbers** are derived for change files that don't pin one
-- **Contributors** — commit authors since the previous tag are listed in `release.json` and in a `### Contributors` section in the release notes, excluding maintainers (admin/maintain collaborators) and bot accounts
+- **Contributors**: commit authors since the previous tag are listed in `release.json` and in a `### Contributors` section in the release notes, excluding maintainers (admin/maintain collaborators) and bot accounts
 
 Both require `fetch-depth: 0` so the previous tag is reachable. Enrichment is skipped under `--dry-run`.

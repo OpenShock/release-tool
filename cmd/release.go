@@ -38,7 +38,7 @@ var releaseCmd = &cobra.Command{
 			opts.prereleaseLabel = bcfg.Label
 			opts.gitSHA = bcfg.SHA
 			return runPrerelease(opts)
-		default: // none — write release.json but no git tag
+		default: // none: write release.json but no git tag
 			opts.noTag = true
 			opts.prereleaseLabel = bcfg.Label
 			opts.gitSHA = bcfg.SHA

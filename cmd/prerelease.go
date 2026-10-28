@@ -82,7 +82,7 @@ func runPrerelease(opts releaseOptions) error {
 	tag := cfg.TagPrefix + base
 	switch {
 	case opts.prereleaseLabel != "" && opts.gitSHA:
-		// SHA is the unique identifier — no .N counter, no tag lookup.
+		// SHA is the unique identifier: no .N counter, no tag lookup.
 		sha, err := git.ShortSHA(root)
 		if err != nil {
 			return err

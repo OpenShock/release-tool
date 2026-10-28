@@ -146,7 +146,7 @@ func Commit(root, message string) error {
 // MergeRefBaseParent returns HEAD's first parent and true when HEAD is a merge
 // commit (two or more parents). A GitHub pull_request checkout uses the synthetic
 // refs/pull/N/merge ref, whose first parent is the base branch tip the PR is
-// being merged into — a more reliable base than the event's recorded base.sha,
+// being merged into, a more reliable base than the event's recorded base.sha,
 // which can lag on long-lived or reopened PRs. Returns ("", false) otherwise.
 func MergeRefBaseParent(root string) (string, bool) {
 	out, err := run(root, "rev-list", "--parents", "-n", "1", "HEAD")
