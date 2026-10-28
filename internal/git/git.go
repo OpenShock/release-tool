@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/OpenShock/release-tool/internal/changes"
 )
 
 // ghAPI runs `gh api <args...>` in root and returns stdout. The gh CLI handles
@@ -167,7 +170,8 @@ func IsAncestor(root, a, b string) bool {
 
 // ChangedChangeFilesSinceRef returns basenames of .changes/*.md files added
 // since ref (exclusive) up to HEAD. When ref is empty, the full history is
-// searched. Files matching readme.md or _headline.md are excluded.
+// searched. Only files directly in .changes/ count (not the release archive),
+// and README.md and reserved "_" files are excluded.
 func ChangedChangeFilesSinceRef(root, ref string) ([]string, error) {
 	var args []string
 	if ref != "" {
@@ -186,9 +190,11 @@ func ChangedChangeFilesSinceRef(root, ref string) ([]string, error) {
 		if line == "" {
 			continue
 		}
-		base := filepath.Base(line)
-		lower := strings.ToLower(base)
-		if !strings.HasSuffix(lower, ".md") || lower == "readme.md" || lower == "_headline.md" {
+		if path.Dir(filepath.ToSlash(line)) != ".changes" {
+			continue
+		}
+		base := path.Base(filepath.ToSlash(line))
+		if !changes.IsChangeFileName(base) {
 			continue
 		}
 		if seen[base] {
@@ -333,4 +339,73 @@ func PRForCommit(root, sha string) int {
 		return 0
 	}
 	return pulls[0].Number
+}
+
+// ChangedFilesSinceRef returns the paths (slash-separated, repo-relative) that
+// differ between the merge base of ref and HEAD, and HEAD: the files a branch
+// or pull request touches.
+func ChangedFilesSinceRef(root, ref string) ([]string, error) {
+	out, err := run(root, "diff", "--name-only", ref+"...HEAD")
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, line := range strings.Split(out, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			files = append(files, line)
+		}
+	}
+	return files, nil
+}
+
+// PreviousPrereleaseTag returns the highest-versioned tag of the form
+// <prefix>X.Y.Z-<label>.N that is an ancestor of HEAD, is not exclude, and
+// (when stableTag is set) descends from stableTag. It is the prerelease the
+// next one should be compared against. Returns "" when there is none.
+func PreviousPrereleaseTag(root, prefix, label, stableTag, exclude string) string {
+	out, err := run(root, "tag", "--sort=-v:refname")
+	if err != nil {
+		return ""
+	}
+	re := regexp.MustCompile(`^` + regexp.QuoteMeta(prefix) + `\d+\.\d+\.\d+-` + regexp.QuoteMeta(label) + `\.\d+$`)
+	for _, tag := range strings.Split(out, "\n") {
+		tag = strings.TrimSpace(tag)
+		if tag == "" || tag == exclude || !re.MatchString(tag) {
+			continue
+		}
+		if !IsAncestor(root, tag, "HEAD") {
+			continue
+		}
+		if stableTag != "" && !IsAncestor(root, stableTag, tag) {
+			continue
+		}
+		return tag
+	}
+	return ""
+}
+
+// FirstTimeContributors returns the logins (in input order) that authored no
+// commit reachable from previousTag, i.e. whose first contribution is in this
+// release. Returns nil when gh is unavailable or previousTag is empty.
+func FirstTimeContributors(root, previousTag string, logins []string) []string {
+	if previousTag == "" {
+		return nil
+	}
+	var first []string
+	for _, login := range logins {
+		if strings.HasSuffix(login, "[bot]") {
+			continue
+		}
+		out, err := ghAPI(root,
+			fmt.Sprintf("repos/{owner}/{repo}/commits?sha=%s&author=%s&per_page=1", previousTag, login),
+			"--jq", "length")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not check earlier commits by %s (%v)\n", login, err)
+			return nil
+		}
+		if strings.TrimSpace(string(out)) == "0" {
+			first = append(first, login)
+		}
+	}
+	return first
 }

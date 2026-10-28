@@ -41,6 +41,9 @@ func releaseRepo(t *testing.T, tagPrefix string) string {
 	gitCmd(t, root, "config", "user.email", "test@test.com")
 	gitCmd(t, root, "config", "commit.gpgsign", "false")
 	gitCmd(t, root, "config", "tag.gpgsign", "false")
+	// Keep files byte-identical on Windows, where a global core.autocrlf would
+	// otherwise make a restored file show as modified.
+	gitCmd(t, root, "config", "core.autocrlf", "false")
 	mustWrite(t, filepath.Join(root, ".changes", "config.json"),
 		`{"tag_prefix":`+strconv.Quote(tagPrefix)+`,"branches":{"master":{"release":"stable"}}}`)
 	mustWrite(t, filepath.Join(root, ".changes", "feat.md"), "---\nkind: added\n---\nAdd a feature\n")

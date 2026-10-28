@@ -78,8 +78,8 @@ func TestRenderChangelog_BreakingBadge(t *testing.T) {
 		},
 	}
 	entry := RenderChangelog(d, "")
-	if !strings.Contains(entry, "**BREAKING**") {
-		t.Errorf("expected BREAKING badge in:\n%s", entry)
+	if !strings.Contains(entry, "- **Breaking:** Drop API") {
+		t.Errorf("expected a **Breaking:** prefix in:\n%s", entry)
 	}
 }
 
@@ -155,7 +155,7 @@ func TestRenderChangelog_NoLinksWithoutRepo(t *testing.T) {
 func TestRenderNotes_Headline(t *testing.T) {
 	d := baseData()
 	d.Headline = "Exciting release"
-	entry := RenderNotes(d, nil)
+	entry := RenderNotes(d, NotesOptions{})
 	if !strings.Contains(entry, "Exciting release") {
 		t.Errorf("missing headline in:\n%s", entry)
 	}
@@ -164,7 +164,7 @@ func TestRenderNotes_Headline(t *testing.T) {
 func TestRenderNotes_NoHeadline(t *testing.T) {
 	d := baseData()
 	d.Headline = ""
-	entry := RenderNotes(d, nil)
+	entry := RenderNotes(d, NotesOptions{})
 	if !strings.Contains(entry, "### Added") {
 		t.Errorf("sections should still appear without headline:\n%s", entry)
 	}
@@ -173,7 +173,7 @@ func TestRenderNotes_NoHeadline(t *testing.T) {
 func TestRenderNotes_Contributors(t *testing.T) {
 	d := baseData()
 	d.Contributors = []string{"alice", "bob"}
-	entry := RenderNotes(d, nil)
+	entry := RenderNotes(d, NotesOptions{})
 	if !strings.Contains(entry, "### Contributors") {
 		t.Errorf("expected Contributors heading in:\n%s", entry)
 	}
@@ -186,7 +186,7 @@ func TestRenderNotes_ContributorsExcludesMaintainersAndBots(t *testing.T) {
 	d := baseData()
 	d.Contributors = []string{"alice", "Maintainer", "dependabot[bot]"}
 	maintainers := map[string]bool{"maintainer": true}
-	entry := RenderNotes(d, maintainers)
+	entry := RenderNotes(d, NotesOptions{Maintainers: maintainers})
 	if !strings.Contains(entry, "@alice") {
 		t.Errorf("expected @alice in:\n%s", entry)
 	}
@@ -201,7 +201,7 @@ func TestRenderNotes_ContributorsExcludesMaintainersAndBots(t *testing.T) {
 func TestRenderNotes_NoContributorsSectionWhenAllFiltered(t *testing.T) {
 	d := baseData()
 	d.Contributors = []string{"onlymaintainer", "ci[bot]"}
-	entry := RenderNotes(d, map[string]bool{"onlymaintainer": true})
+	entry := RenderNotes(d, NotesOptions{Maintainers: map[string]bool{"onlymaintainer": true}})
 	if strings.Contains(entry, "Thanks to") {
 		t.Errorf("should omit thanks when everyone is filtered:\n%s", entry)
 	}
@@ -223,8 +223,11 @@ func choreData() *ReleaseData {
 
 func TestRenderChangelog_IncludesChores(t *testing.T) {
 	entry := RenderChangelog(choreData(), "")
-	if !strings.Contains(entry, "### Chores") {
-		t.Errorf("changelog should include a Chores section:\n%s", entry)
+	if !strings.Contains(entry, "### Internal") {
+		t.Errorf("changelog should include an Internal section:\n%s", entry)
+	}
+	if strings.Index(entry, "### Internal") < strings.Index(entry, "### Added") {
+		t.Errorf("Internal must come last:\n%s", entry)
 	}
 	if !strings.Contains(entry, "Bump dependency") {
 		t.Errorf("changelog should include the chore entry:\n%s", entry)
@@ -232,8 +235,8 @@ func TestRenderChangelog_IncludesChores(t *testing.T) {
 }
 
 func TestRenderNotes_ExcludesChores(t *testing.T) {
-	entry := RenderNotes(choreData(), nil)
-	if strings.Contains(entry, "### Chores") || strings.Contains(entry, "Bump dependency") {
+	entry := RenderNotes(choreData(), NotesOptions{})
+	if strings.Contains(entry, "### Internal") || strings.Contains(entry, "Bump dependency") {
 		t.Errorf("GitHub Release notes must exclude chores:\n%s", entry)
 	}
 	if !strings.Contains(entry, "User feature") {
@@ -241,13 +244,16 @@ func TestRenderNotes_ExcludesChores(t *testing.T) {
 	}
 }
 
-func TestRenderNotes_SafetyOrderedAfterUserFacingKinds(t *testing.T) {
-	entry := RenderNotes(choreData(), nil)
+func TestRenderNotes_SafetyFirstWithCautionAlert(t *testing.T) {
+	entry := RenderNotes(choreData(), NotesOptions{})
 	if !strings.Contains(entry, "### Safety") {
 		t.Fatalf("expected a Safety section:\n%s", entry)
 	}
-	if addedIdx, safetyIdx := strings.Index(entry, "### Added"), strings.Index(entry, "### Safety"); addedIdx > safetyIdx {
-		t.Errorf("expected Added before Safety:\n%s", entry)
+	if addedIdx, safetyIdx := strings.Index(entry, "### Added"), strings.Index(entry, "### Safety"); safetyIdx > addedIdx {
+		t.Errorf("expected Safety before Added:\n%s", entry)
+	}
+	if !strings.HasPrefix(entry, "> [!CAUTION]\n") {
+		t.Errorf("a safety change must open the body with a CAUTION alert:\n%s", entry)
 	}
 }
 
@@ -266,7 +272,7 @@ func TestRenderNotes_IncludesReleaseNoteBody(t *testing.T) {
 			},
 		},
 	}
-	entry := RenderNotes(d, nil)
+	entry := RenderNotes(d, NotesOptions{})
 	if !strings.Contains(entry, "Why it matters.") || !strings.Contains(entry, "How to use it.") {
 		t.Errorf("release note description lines should appear in the GitHub Release body:\n%s", entry)
 	}
@@ -326,7 +332,7 @@ func TestRenderNotes_LinksPRWhenRepoKnown(t *testing.T) {
 	d := baseData()
 	d.Repository = &Repository{Platform: "github", Owner: "OpenShock", Repo: "Firmware"}
 	d.Changes[0].PR = ptr(426)
-	notes := RenderNotes(d, nil)
+	notes := RenderNotes(d, NotesOptions{})
 	if !strings.Contains(notes, "- Add new feature ([#426](https://github.com/OpenShock/Firmware/pull/426))") {
 		t.Errorf("expected linked PR in:\n%s", notes)
 	}
@@ -335,25 +341,20 @@ func TestRenderNotes_LinksPRWhenRepoKnown(t *testing.T) {
 func TestRenderNotes_PlainPRWithoutRepo(t *testing.T) {
 	d := baseData()
 	d.Changes[0].PR = ptr(426)
-	notes := RenderNotes(d, nil)
+	notes := RenderNotes(d, NotesOptions{})
 	if !strings.Contains(notes, "- Add new feature (#426)") {
 		t.Errorf("expected plain PR reference in:\n%s", notes)
 	}
 }
 
-func TestRenderNotes_SkipsListItemsInDescription(t *testing.T) {
+func TestRenderNotes_FoldsListItemsInDescription(t *testing.T) {
 	d := baseData()
 	d.Changes[0].ReleaseNote = &ReleaseNoteEntry{
 		Title:       "User title",
 		Description: []string{"A prose sentence users care about.", "- internal detail", "* another detail", "1. numbered detail"},
 	}
-	notes := RenderNotes(d, nil)
-	if !strings.Contains(notes, "  A prose sentence users care about.") {
-		t.Errorf("prose description should be kept in:\n%s", notes)
-	}
-	for _, s := range []string{"internal detail", "another detail", "numbered detail"} {
-		if strings.Contains(notes, s) {
-			t.Errorf("list item %q should be left out of:\n%s", s, notes)
-		}
+	notes := RenderNotes(d, NotesOptions{})
+	if !strings.Contains(notes, "  A prose sentence users care about.\n  <details><summary>Details</summary>\n\n  - internal detail\n  * another detail\n  1. numbered detail\n\n  </details>\n") {
+		t.Errorf("list items should be folded into a details block under the entry:\n%s", notes)
 	}
 }

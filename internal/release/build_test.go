@@ -39,8 +39,8 @@ func TestBuildData_Fields(t *testing.T) {
 	}
 	data := BuildData(p)
 
-	if data.SchemaVersion != 1 {
-		t.Errorf("SchemaVersion: got %d, want 1", data.SchemaVersion)
+	if data.SchemaVersion != 2 {
+		t.Errorf("SchemaVersion: got %d, want 2", data.SchemaVersion)
 	}
 	if data.Tag != "1.3.0" {
 		t.Errorf("Tag: got %q", data.Tag)

@@ -2,8 +2,10 @@ package release
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/OpenShock/release-tool/internal/changes"
@@ -29,6 +31,8 @@ type Verdict struct {
 	State CheckState `json:"state"`
 	PR    int        `json:"pr"`
 	Body  string     `json:"body"`
+	// Findings are the per-file errors and warnings, for CI annotations.
+	Findings []changes.Finding `json:"findings,omitempty"`
 }
 
 type CheckParams struct {
@@ -36,13 +40,14 @@ type CheckParams struct {
 	BaseBranch string          // PR base branch, looked up in Config.Branches
 	Against    string          // git ref to diff against for added change files
 	PR         int             // PR number, passed through to the verdict
-	Config     *changes.Config // repo config (for Branches)
+	Config     *changes.Config // repo config (for Branches and IgnorePaths)
 }
 
 // RunCheck evaluates the change files a pull request adds relative to its base.
-// It returns skip when the base is not a configured release branch, missing
-// when the PR adds no change file, invalid when an added file fails validation,
-// and ok otherwise. It performs no network or comment side effects.
+// It returns skip when the base is not a configured release branch or the PR
+// only touches ignored paths, missing when the PR adds no change file, invalid
+// when an added file fails validation or lint, and ok otherwise. It performs no
+// network or comment side effects.
 func RunCheck(p CheckParams) (Verdict, error) {
 	if p.Config == nil {
 		return Verdict{State: StateSkip, PR: p.PR}, nil
@@ -68,54 +73,130 @@ func RunCheck(p CheckParams) (Verdict, error) {
 		return Verdict{}, err
 	}
 
-	state, detail := StateOK, ""
-	switch {
-	case len(added) == 0:
+	if len(added) == 0 && len(p.Config.IgnorePaths) > 0 && against != "" {
+		touched, err := git.ChangedFilesSinceRef(p.Root, against)
+		if err != nil {
+			return Verdict{}, err
+		}
+		if allIgnored(touched, p.Config.IgnorePaths) {
+			return Verdict{State: StateSkip, PR: p.PR}, nil
+		}
+	}
+
+	state := StateOK
+	var findings []changes.Finding
+	if len(added) == 0 {
 		state = StateMissing
-	default:
+	} else {
 		ch, vErr := changes.ReadSubset(p.Root, added)
-		if vErr != nil {
-			state, detail = StateInvalid, vErr.Error()
-		} else {
+		var invalid *changes.InvalidFilesError
+		switch {
+		case errors.As(vErr, &invalid):
+			findings = invalid.Findings
+		case vErr != nil:
+			return Verdict{}, vErr
+		default:
 			for _, c := range ch {
 				if c.PR != nil || c.PRExplicitNone {
-					state = StateInvalid
-					detail += fmt.Sprintf("  - %s: pr field must not be set in a PR (it is assigned automatically at release time)\n", c.Filename)
+					findings = append(findings, changes.Finding{File: c.Filename, Severity: changes.SeverityError,
+						Message: "pr field must not be set in a PR (it is assigned automatically at release time)"})
 				}
 			}
-			if state == StateInvalid {
-				detail = "invalid change files:\n" + detail
-			}
+			findings = append(findings, changes.Lint(ch)...)
+		}
+		if changes.HasErrors(findings) {
+			state = StateInvalid
 		}
 	}
 
 	return Verdict{
-		State: state,
-		PR:    p.PR,
-		Body:  renderCheckBody(state, len(added), detail),
+		State:    state,
+		PR:       p.PR,
+		Body:     renderCheckBody(state, len(added), findings),
+		Findings: findings,
 	}, nil
 }
 
-func renderCheckBody(state CheckState, count int, detail string) string {
+// globRe converts a path glob to a regexp: `**` matches across directories,
+// `*` and `?` stay within one path segment.
+func globRe(glob string) *regexp.Regexp {
+	var b strings.Builder
+	b.WriteString("^")
+	for i := 0; i < len(glob); i++ {
+		switch c := glob[i]; {
+		case strings.HasPrefix(glob[i:], "**/"):
+			b.WriteString("(?:.*/)?")
+			i += 2
+		case strings.HasPrefix(glob[i:], "**"):
+			b.WriteString(".*")
+			i++
+		case c == '*':
+			b.WriteString("[^/]*")
+		case c == '?':
+			b.WriteString("[^/]")
+		default:
+			b.WriteString(regexp.QuoteMeta(string(c)))
+		}
+	}
+	b.WriteString("$")
+	return regexp.MustCompile(b.String())
+}
+
+// allIgnored reports whether every file matches one of the globs. An empty
+// file list is not "all ignored": a PR with no changes still needs a decision.
+func allIgnored(files, globs []string) bool {
+	if len(files) == 0 {
+		return false
+	}
+	res := make([]*regexp.Regexp, len(globs))
+	for i, g := range globs {
+		res[i] = globRe(g)
+	}
+	for _, f := range files {
+		matched := false
+		for _, re := range res {
+			if re.MatchString(f) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
+}
+
+func renderCheckBody(state CheckState, count int, findings []changes.Finding) string {
 	var b strings.Builder
 	b.WriteString(checkMarker)
 	b.WriteString("\n### Change file check\n\n")
 	switch state {
 	case StateOK:
-		fmt.Fprintf(&b, "✅ **OK** — %d valid change file(s) added in this PR.\n", count)
+		fmt.Fprintf(&b, "✅ **OK**: %d valid change file(s) added in this PR.\n", count)
 	case StateMissing:
-		b.WriteString("⚠️ **Missing** — this PR does not add a change file under `.changes/`.\n\n")
-		fmt.Fprintf(&b, "If this change should show up in the release notes, add one with `release-tool new \"<title>\" --kind <%s>`.\n", changes.KindList())
+		b.WriteString("⚠️ **Missing**: this PR does not add a change file under `.changes/`.\n\n")
+		fmt.Fprintf(&b, "If this change should show up in the release notes, add one with `release-tool new \"<title>\" --kind <%s>`. Otherwise add the `no-changelog` label.\n", changes.KindList())
 	case StateInvalid:
-		b.WriteString("❌ **Invalid format** — an added change file failed validation:\n\n")
-		// detail embeds attacker-controlled change-file content (filenames, YAML
-		// values) and is posted verbatim into a privileged PR comment. Use a
-		// fence longer than any backtick run inside it so the content cannot
-		// break out of the code block and inject markdown.
-		body := strings.TrimSpace(detail)
-		fence := safeFence(body)
-		fmt.Fprintf(&b, "%s\n%s\n%s\n", fence, body, fence)
+		b.WriteString("❌ **Invalid**: an added change file failed validation:\n\n")
 	}
+	if len(findings) == 0 {
+		return b.String()
+	}
+	if state != StateInvalid {
+		b.WriteString("\nSuggestions:\n\n")
+	}
+	lines := make([]string, len(findings))
+	for i, f := range findings {
+		lines[i] = f.String()
+	}
+	// The findings embed attacker-controlled change-file content (filenames,
+	// YAML values) and are posted verbatim into a privileged PR comment. Use a
+	// fence longer than any backtick run inside so the content cannot break out
+	// of the code block and inject markdown.
+	body := strings.Join(lines, "\n")
+	fence := safeFence(body)
+	fmt.Fprintf(&b, "%s\n%s\n%s\n", fence, body, fence)
 	return b.String()
 }
 
