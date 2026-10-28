@@ -397,7 +397,7 @@ Direct prerelease invocation for manual use. Reads the current branch for contex
 release-tool check --base master --against <base-sha> --pr <pr-number> --out release-check.json
 ```
 
-Writes a verdict JSON used by the PR comment stage. Exit code is non-zero on `invalid`, and on `missing` with `--require-changes` (the action's default). Findings are printed as GitHub annotations on the offending file. A PR whose files all match `ignore_paths` in `.changes/config.json` is skipped.
+Writes a verdict JSON used by the PR comment stage. Exit code is non-zero on `invalid`, and on `missing` with `--require-changes` (the action's default). Findings are printed as GitHub annotations on the offending file. For a valid PR the comment also states its version impact: the bump level of its change files and the next release version with and without the PR (also in the verdict JSON as `impact`). A PR whose files all match `ignore_paths` in `.changes/config.json` is skipped.
 
 ## Action reference
 

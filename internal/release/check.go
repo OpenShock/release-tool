@@ -33,6 +33,58 @@ type Verdict struct {
 	Body  string     `json:"body"`
 	// Findings are the per-file errors and warnings, for CI annotations.
 	Findings []changes.Finding `json:"findings,omitempty"`
+	// Impact is how the PR moves the next release version, when it adds
+	// valid change files.
+	Impact *VersionImpact `json:"impact,omitempty"`
+}
+
+// VersionImpact describes how a pull request's change files move the next
+// release version.
+type VersionImpact struct {
+	// Bump is the highest bump among the PR's own change files.
+	Bump string `json:"bump"`
+	// Latest is the latest stable version ("" before the first release).
+	Latest string `json:"latest,omitempty"`
+	// Before is the next version from the pending changes without this PR
+	// ("" when nothing else is pending); After includes the PR.
+	Before string `json:"before,omitempty"`
+	After  string `json:"after"`
+}
+
+// versionImpact computes the PR's effect on the next version from every
+// pending change file at HEAD. It returns nil when that cannot be determined
+// (another pending file is invalid, or the tags are unreadable), so the check
+// itself never fails on it.
+func versionImpact(root, tagPrefix string, prChanges []*changes.Change) *VersionImpact {
+	all, err := changes.Read(root)
+	if err != nil {
+		return nil
+	}
+	latest, err := git.LatestStableTag(root, tagPrefix)
+	if err != nil {
+		return nil
+	}
+	after, err := ComputeNext(all, latest)
+	if err != nil {
+		return nil
+	}
+	inPR := make(map[string]bool, len(prChanges))
+	for _, c := range prChanges {
+		inPR[c.Filename] = true
+	}
+	var others []*changes.Change
+	for _, c := range all {
+		if !inPR[c.Filename] {
+			others = append(others, c)
+		}
+	}
+	impact := &VersionImpact{Bump: HighestBump(prChanges), Latest: latest, After: after}
+	if len(others) > 0 {
+		if impact.Before, err = ComputeNext(others, latest); err != nil {
+			return nil
+		}
+	}
+	return impact
 }
 
 type CheckParams struct {
@@ -85,6 +137,7 @@ func RunCheck(p CheckParams) (Verdict, error) {
 
 	state := StateOK
 	var findings []changes.Finding
+	var impact *VersionImpact
 	if len(added) == 0 {
 		state = StateMissing
 	} else {
@@ -103,6 +156,9 @@ func RunCheck(p CheckParams) (Verdict, error) {
 				}
 			}
 			findings = append(findings, changes.Lint(ch)...)
+			if len(ch) > 0 {
+				impact = versionImpact(p.Root, p.Config.TagPrefix, ch)
+			}
 		}
 		if changes.HasErrors(findings) {
 			state = StateInvalid
@@ -112,8 +168,9 @@ func RunCheck(p CheckParams) (Verdict, error) {
 	return Verdict{
 		State:    state,
 		PR:       p.PR,
-		Body:     renderCheckBody(state, len(added), findings),
+		Body:     renderCheckBody(state, len(added), findings, impact),
 		Findings: findings,
+		Impact:   impact,
 	}, nil
 }
 
@@ -167,13 +224,41 @@ func allIgnored(files, globs []string) bool {
 	return true
 }
 
-func renderCheckBody(state CheckState, count int, findings []changes.Finding) string {
+// bumpMeaning explains a bump level in the PR comment.
+var bumpMeaning = map[string]string{
+	"major": "breaking change",
+	"minor": "new or changed behaviour",
+	"patch": "fix",
+}
+
+// writeImpact renders the version line of the PR comment.
+func writeImpact(b *strings.Builder, im *VersionImpact) {
+	fmt.Fprintf(b, "\n**Version impact:** **%s** bump (%s). ", im.Bump, bumpMeaning[im.Bump])
+	switch {
+	case im.Before == "":
+		fmt.Fprintf(b, "The next release will be **%s**", im.After)
+	case im.Before == im.After:
+		fmt.Fprintf(b, "The next release stays **%s**", im.After)
+	default:
+		fmt.Fprintf(b, "The next release becomes **%s**, up from %s without this PR", im.After, im.Before)
+	}
+	if im.Latest != "" {
+		fmt.Fprintf(b, " (latest stable: %s).\n", im.Latest)
+	} else {
+		b.WriteString(" (first release).\n")
+	}
+}
+
+func renderCheckBody(state CheckState, count int, findings []changes.Finding, impact *VersionImpact) string {
 	var b strings.Builder
 	b.WriteString(checkMarker)
 	b.WriteString("\n### Change file check\n\n")
 	switch state {
 	case StateOK:
 		fmt.Fprintf(&b, "✅ **OK**: %d valid change file(s) added in this PR.\n", count)
+		if impact != nil {
+			writeImpact(&b, impact)
+		}
 	case StateMissing:
 		b.WriteString("⚠️ **Missing**: this PR does not add a change file under `.changes/`.\n\n")
 		fmt.Fprintf(&b, "If this change should show up in the release notes, add one with `release-tool new \"<title>\" --kind <%s>`. Otherwise add the `no-changelog` label.\n", changes.KindList())

@@ -28,7 +28,7 @@ func TestRenderCheckBody(t *testing.T) {
 		{StateOK, 1, []changes.Finding{{File: "x.md", Severity: changes.SeverityWarning, Message: "use the imperative"}}, "Suggestions"},
 	}
 	for _, c := range cases {
-		body := renderCheckBody(c.state, c.count, c.findings)
+		body := renderCheckBody(c.state, c.count, c.findings, nil)
 		if !strings.HasPrefix(body, checkMarker) {
 			t.Errorf("%s: body must start with the sticky marker", c.state)
 		}
@@ -42,7 +42,7 @@ func TestRenderCheckBody_FenceContainsBacktickContent(t *testing.T) {
 	// Attacker-controlled content with a triple-backtick run must not be able to
 	// break out of the code fence in the privileged PR comment.
 	f := changes.Finding{File: "evil.md", Severity: changes.SeverityError, Message: "```\n## Injected heading\n![img](http://x)"}
-	body := renderCheckBody(StateInvalid, 1, []changes.Finding{f})
+	body := renderCheckBody(StateInvalid, 1, []changes.Finding{f}, nil)
 	fence := safeFence(f.String())
 	if len(fence) <= 3 {
 		t.Errorf("fence should be longer than the embedded backtick run, got %q", fence)
