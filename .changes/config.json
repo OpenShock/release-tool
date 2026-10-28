@@ -3,5 +3,6 @@
   "branches": {
     "master": { "release": "stable" },
     "alpha": { "release": "prerelease", "label": "alpha" }
-  }
+  },
+  "maintainers": ["hhvrc", "LucHeart", "nullstalgia"]
 }
