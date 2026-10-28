@@ -65,6 +65,7 @@ func runCheck(_ *cobra.Command, _ []string) error {
 	if err := release.WriteVerdict(checkOut, v); err != nil {
 		return err
 	}
+	reportFindings(v.Findings)
 	fmt.Fprintf(os.Stderr, "check: %s (pr #%d) -> %s\n", v.State, v.PR, checkOut)
 	writeCheckState(v.State)
 

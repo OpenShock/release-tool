@@ -39,6 +39,13 @@ inputs:
     description: "check mode: pull request number, recorded in the verdict"
     required: false
     default: ${{ github.event.pull_request.number }}
+  require-changes:
+    description: >
+      check mode: fail when the pull request adds no change file. Skip the check
+      for intentional non-release changes with the no-changelog label, or list
+      such paths under ignore_paths in .changes/config.json.
+    required: false
+    default: 'true'
   go-version:
     description: Go version to use
     required: false
@@ -144,6 +151,7 @@ runs:
         BASE_REF: ${{ inputs.base-ref }}
         BASE_SHA: ${{ inputs.base-sha }}
         PR_NUMBER: ${{ inputs.pr-number }}
+        REQUIRE_CHANGES: ${{ inputs.require-changes }}
       run: |
         BIN="$PWD/release-tool"
         case "$RELEASE_MODE" in
@@ -157,11 +165,10 @@ runs:
             "$BIN" status --root "$WORKSPACE"
             ;;
           check)
-            "$BIN" check --root "$WORKSPACE" \
-              --base    "$BASE_REF" \
-              --against "$BASE_SHA" \
-              --pr      "$PR_NUMBER" \
-              --out     "$WORKSPACE/release-check.json"
+            ARGS=(--root "$WORKSPACE" --base "$BASE_REF" --against "$BASE_SHA" \
+              --pr "$PR_NUMBER" --out "$WORKSPACE/release-check.json")
+            [ "$REQUIRE_CHANGES" = "true" ] && ARGS+=(--require-changes)
+            "$BIN" check "${ARGS[@]}"
             ;;
           *)
             echo "Unknown mode: $RELEASE_MODE" >&2

@@ -66,6 +66,13 @@ func runPrerelease(opts releaseOptions) error {
 		writeGitHubOutputSkip()
 		return nil
 	}
+	if err := lintPending(ch); err != nil {
+		return err
+	}
+	knownIssues, err := changes.ReadKnownIssues(root)
+	if err != nil {
+		return err
+	}
 
 	base, err := release.ComputeNext(ch, latest)
 	if err != nil {
@@ -75,7 +82,7 @@ func runPrerelease(opts releaseOptions) error {
 	tag := cfg.TagPrefix + base
 	switch {
 	case opts.prereleaseLabel != "" && opts.gitSHA:
-		// SHA is the unique identifier — no .N counter, no tag lookup.
+		// SHA is the unique identifier: no .N counter, no tag lookup.
 		sha, err := git.ShortSHA(root)
 		if err != nil {
 			return err
@@ -110,20 +117,36 @@ func runPrerelease(opts releaseOptions) error {
 
 	prevTag, maintainers := enrichment(root, cfg, latest, opts.dryRun)
 
+	// A numbered prerelease (rc.N) lists what is new since the previous one, so
+	// testers know what to look at. SHA builds have no meaningful predecessor.
+	var prevPre string
+	var newSince []string
+	if opts.prereleaseLabel != "" && !opts.gitSHA {
+		prevPre = git.PreviousPrereleaseTag(root, cfg.TagPrefix, opts.prereleaseLabel, prevTag, tag)
+		if prevPre != "" {
+			if newSince, err = git.ChangedChangeFilesSinceRef(root, prevPre); err != nil {
+				return err
+			}
+		}
+	}
+
 	githubRepo := os.Getenv("GITHUB_REPOSITORY")
 
 	data := release.BuildData(release.BuildParams{
-		Tag:         tag,
-		Previous:    latest,
-		PreviousTag: prevTag,
-		Changes:     ch,
-		Headline:    changes.ReadHeadline(root),
-		Prerelease:  true,
-		Commit:      commit,
-		Version:     base,
-		Root:        root,
-		EnrichPR:    !opts.dryRun,
-		GithubRepo:  githubRepo,
+		Tag:                tag,
+		Previous:           latest,
+		PreviousTag:        prevTag,
+		Changes:            ch,
+		Headline:           changes.ReadHeadline(root),
+		KnownIssues:        knownIssues,
+		PreviousPrerelease: prevPre,
+		NewSincePrerelease: newSince,
+		Prerelease:         true,
+		Commit:             commit,
+		Version:            base,
+		Root:               root,
+		EnrichPR:           !opts.dryRun,
+		GithubRepo:         githubRepo,
 	})
 
 	if opts.dryRun {
@@ -137,7 +160,7 @@ func runPrerelease(opts releaseOptions) error {
 		return err
 	}
 	if opts.notes != "" {
-		if err := release.WriteNotes(opts.notes, data, maintainers); err != nil {
+		if err := release.WriteNotes(opts.notes, data, notesOptions(cfg, maintainers)); err != nil {
 			return err
 		}
 	}

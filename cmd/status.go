@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/OpenShock/release-tool/internal/changes"
@@ -80,6 +81,18 @@ func runStatus(_ *cobra.Command, _ []string) error {
 	headline := changes.ReadHeadline(root)
 	if headline != "" {
 		fmt.Printf("\nHeadline (%d chars) from .changes/_headline.md\n", len(headline))
+	}
+	if issues, err := changes.ReadKnownIssues(root); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+	} else if len(issues) > 0 {
+		fmt.Printf("Known issues:      %d from .changes/%s\n", len(issues), changes.KnownIssuesFile)
+	}
+
+	// Status is informational (CI runs it on every build), so lint findings
+	// are reported but never fail it; check and release enforce them.
+	if findings := changes.Lint(ch); len(findings) > 0 {
+		fmt.Println()
+		reportFindings(findings)
 	}
 
 	return nil

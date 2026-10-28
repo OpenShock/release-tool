@@ -29,6 +29,18 @@ func runRelease(opts releaseOptions) error {
 		return err
 	}
 
+	if err := lintPending(ch); err != nil {
+		return err
+	}
+	headline := changes.ReadHeadline(root)
+	if headline == "" {
+		fmt.Fprintf(os.Stderr, "warning: no %s/%s; a stable release should say what matters most in it\n", changes.Dir, changes.HeadlineFile)
+	}
+	knownIssues, err := changes.ReadKnownIssues(root)
+	if err != nil {
+		return err
+	}
+
 	latest, err := git.LatestStableTag(root, cfg.TagPrefix)
 	if err != nil {
 		return err
@@ -54,7 +66,8 @@ func runRelease(opts releaseOptions) error {
 		Previous:    latest,
 		PreviousTag: prevTag,
 		Changes:     ch,
-		Headline:    changes.ReadHeadline(root),
+		Headline:    headline,
+		KnownIssues: knownIssues,
 		Prerelease:  false,
 		Commit:      commit,
 		Version:     base,
@@ -89,7 +102,7 @@ func runRelease(opts releaseOptions) error {
 		return err
 	}
 	if opts.notes != "" {
-		if err := release.WriteNotes(opts.notes, data, maintainers); err != nil {
+		if err := release.WriteNotes(opts.notes, data, notesOptions(cfg, maintainers)); err != nil {
 			return err
 		}
 	}
@@ -112,33 +125,47 @@ func runRelease(opts releaseOptions) error {
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("reading CHANGELOG.md: %w", err)
 	}
-	if err := os.WriteFile(changelogPath, []byte(entry+"\n"+string(existing)), 0644); err != nil {
+	previous := release.MarkYanked(string(existing), cfg.TagPrefix, data.Yanks)
+	if err := os.WriteFile(changelogPath, []byte(entry+"\n"+previous), 0644); err != nil {
 		return fmt.Errorf("writing CHANGELOG.md: %w", err)
 	}
 	fmt.Fprintln(os.Stderr, "Updated CHANGELOG.md")
 
-	// Remove consumed change files and stage exactly the paths we touched
-	// (CHANGELOG.md plus each removed file) so unrelated edits under .changes/
-	// are not swept into the release commit. A failed removal is fatal — a
-	// resurrected file would double-count on the next release.
+	// Archive consumed change files (and the headline) to
+	// .changes/released/<version>/ and stage exactly the paths we touched, so
+	// unrelated edits under .changes/ are not swept into the release commit. A
+	// failed move is fatal: a file left behind would double-count on the next
+	// release. Known issues stay until someone removes them.
 	staged := []string{"CHANGELOG.md"}
-	removed := 0
-	for _, c := range ch {
-		rel := filepath.Join(changes.Dir, c.Filename)
-		if err := os.Remove(filepath.Join(root, rel)); err != nil && !os.IsNotExist(err) {
-			return rollback(fmt.Errorf("removing %s: %w", rel, err))
+	archiveRel := filepath.Join(changes.Dir, changes.ArchiveDir, base)
+	if err := os.MkdirAll(filepath.Join(root, archiveRel), 0755); err != nil {
+		return rollback(fmt.Errorf("creating %s: %w", archiveRel, err))
+	}
+	archive := func(name string) (bool, error) {
+		from := filepath.Join(changes.Dir, name)
+		to := filepath.Join(archiveRel, name)
+		if err := os.Rename(filepath.Join(root, from), filepath.Join(root, to)); err != nil {
+			if os.IsNotExist(err) {
+				return false, nil
+			}
+			return false, fmt.Errorf("archiving %s: %w", from, err)
 		}
-		staged = append(staged, rel)
-		removed++
+		staged = append(staged, from, to)
+		return true, nil
 	}
-	headlineRel := filepath.Join(changes.Dir, changes.HeadlineFile)
-	if err := os.Remove(filepath.Join(root, headlineRel)); err == nil {
-		staged = append(staged, headlineRel)
-		fmt.Fprintln(os.Stderr, "Removed .changes/_headline.md")
-	} else if !os.IsNotExist(err) {
-		return rollback(fmt.Errorf("removing %s: %w", headlineRel, err))
+	archived := 0
+	for _, c := range ch {
+		if _, err := archive(c.Filename); err != nil {
+			return rollback(err)
+		}
+		archived++
 	}
-	fmt.Fprintf(os.Stderr, "Removed %d change files\n", removed)
+	if ok, err := archive(changes.HeadlineFile); err != nil {
+		return rollback(err)
+	} else if ok {
+		fmt.Fprintln(os.Stderr, "Archived .changes/_headline.md")
+	}
+	fmt.Fprintf(os.Stderr, "Archived %d change files to %s\n", archived, archiveRel)
 
 	if err := git.Add(root, staged...); err != nil {
 		return rollback(err)

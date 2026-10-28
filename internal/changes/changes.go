@@ -1,9 +1,11 @@
 package changes
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,8 +19,21 @@ import (
 const (
 	Dir          = ".changes"
 	HeadlineFile = "_headline.md"
-	ConfigFile   = "config.json"
+	// KnownIssuesFile lists open known issues. Unlike the headline it is not
+	// consumed by a stable release: each issue stays until someone removes it.
+	KnownIssuesFile = "_known-issues.md"
+	ConfigFile      = "config.json"
+	// ArchiveDir is where a stable release moves the change files it consumed,
+	// as .changes/released/<version>/<file>, so past notes stay editable.
+	ArchiveDir = "released"
 )
+
+// IsChangeFileName reports whether a file in .changes/ is a change file. Names
+// starting with "_" are reserved for special files (headline, known issues).
+func IsChangeFileName(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.HasSuffix(lower, ".md") && lower != "readme.md" && !strings.HasPrefix(lower, "_")
+}
 
 type ReleaseMode string
 
@@ -43,6 +58,15 @@ type Config struct {
 	// independent of the gh-derived collaborator set (which is unavailable when
 	// the token lacks collaborator-read, e.g. the default Actions token).
 	Maintainers []string `json:"maintainers,omitempty"`
+	// PrereleaseNotice replaces the warning that opens a prerelease's GitHub
+	// Release body. "{stable}" is replaced with the latest stable tag.
+	PrereleaseNotice string `json:"prerelease_notice,omitempty"`
+	// IgnorePaths are globs (`*`, `**`, `?`) for files that never need a change
+	// file. A pull request that only touches these paths passes the check.
+	IgnorePaths []string `json:"ignore_paths,omitempty"`
+	// FoldAfter folds a release body section with more than this many entries
+	// into a collapsed <details> block. 0 uses the default; negative disables.
+	FoldAfter int `json:"fold_after,omitempty"`
 }
 
 func ReadConfig(root string) (*Config, error) {
@@ -65,6 +89,22 @@ type Notice struct {
 	Message string
 }
 
+// Upgrade describes what a user has to know or do before installing a
+// release. Every field is optional; a release aggregates them across changes.
+type Upgrade struct {
+	// MinVersion is the oldest version that can update to this one directly.
+	MinVersion string `yaml:"min_version" json:"min_version,omitempty"`
+	// USBOnly means the update cannot be installed over the air.
+	USBOnly bool `yaml:"usb_only" json:"usb_only,omitempty"`
+	// ConfigReset means the update discards the stored configuration.
+	ConfigReset bool `yaml:"config_reset" json:"config_reset,omitempty"`
+	// NoDowngrade means earlier versions cannot be installed afterwards.
+	NoDowngrade bool `yaml:"no_downgrade" json:"no_downgrade,omitempty"`
+}
+
+// IsZero reports whether u sets nothing.
+func (u Upgrade) IsZero() bool { return u == Upgrade{} }
+
 type Change struct {
 	Kind        string
 	Bump        string // derived: major | minor | patch
@@ -79,6 +119,14 @@ type Change struct {
 	// explicit `pr: null`, which suppresses PR derivation entirely.
 	PR             *int
 	PRExplicitNone bool
+	Upgrade        Upgrade
+	// Advisories are CVE or GHSA identifiers fixed by a security change.
+	Advisories []string
+	// Authors are GitHub logins credited for the change, for when the commit
+	// author is not the person to thank (squash merges, co-authored work).
+	Authors []string
+	// Yanks lists earlier versions this release withdraws.
+	Yanks []string
 }
 
 func (c *Change) Slug() string {
@@ -95,7 +143,47 @@ type rawFrontmatter struct {
 	// (suppress), and an integer (verbatim). A zero Kind means the key was
 	// absent. (Must be a value, not a pointer: yaml.v3 only special-cases
 	// decoding into yaml.Node by value.)
-	PR yaml.Node `yaml:"pr"`
+	PR         yaml.Node `yaml:"pr"`
+	Upgrade    Upgrade   `yaml:"upgrade"`
+	Advisories []string  `yaml:"advisories"`
+	Authors    []string  `yaml:"authors"`
+	Yanks      []string  `yaml:"yanks"`
+}
+
+var (
+	versionRe  = regexp.MustCompile(`^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$`)
+	advisoryRe = regexp.MustCompile(`^(CVE-\d{4}-\d{4,}|GHSA(-[23456789cfghjmpqrvwx]{4}){3})$`)
+	loginRe    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,38}(\[bot\])?$`)
+)
+
+// validateExtras checks the optional frontmatter fields and normalises them in
+// place (authors lose a leading "@").
+func validateExtras(fm *rawFrontmatter) []string {
+	var errs []string
+	if v := fm.Upgrade.MinVersion; v != "" && !versionRe.MatchString(v) {
+		errs = append(errs, fmt.Sprintf("upgrade.min_version must be a version like 1.2.3, got %q", v))
+	}
+	for _, a := range fm.Advisories {
+		if !advisoryRe.MatchString(a) {
+			errs = append(errs, fmt.Sprintf("advisory %q must be a CVE-YYYY-NNNN or GHSA-xxxx-xxxx-xxxx id", a))
+		}
+	}
+	if len(fm.Advisories) > 0 && fm.Kind != "security" {
+		errs = append(errs, fmt.Sprintf("advisories require kind: security, got %q", fm.Kind))
+	}
+	for i, a := range fm.Authors {
+		login := strings.TrimPrefix(strings.TrimSpace(a), "@")
+		if !loginRe.MatchString(login) {
+			errs = append(errs, fmt.Sprintf("author %q is not a GitHub login", a))
+		}
+		fm.Authors[i] = login
+	}
+	for _, v := range fm.Yanks {
+		if !versionRe.MatchString(v) {
+			errs = append(errs, fmt.Sprintf("yanks entry must be a version like 1.2.3, got %q", v))
+		}
+	}
+	return errs
 }
 
 // ValidKinds is the canonical, ordered list of change kinds. It is the single
@@ -149,7 +237,17 @@ func splitSections(body string) (changelog, releaseNote, notices string, err err
 	return join("_changelog"), join("release note"), join("notices"), nil
 }
 
-var validNoticeLevels = map[string]bool{"info": true, "warning": true, "error": true}
+// NoticeLevels are the accepted notice levels, most severe first. They map 1:1
+// to GitHub alert types, which is how the release body renders them.
+var NoticeLevels = []string{"caution", "warning", "important", "note"}
+
+var validNoticeLevels = func() map[string]bool {
+	m := make(map[string]bool, len(NoticeLevels))
+	for _, l := range NoticeLevels {
+		m[l] = true
+	}
+	return m
+}()
 
 func parseNotices(raw string) ([]Notice, error) {
 	var (
@@ -173,7 +271,7 @@ func parseNotices(raw string) ([]Notice, error) {
 		}
 		level := strings.ToLower(strings.TrimSpace(body[:idx]))
 		if !validNoticeLevels[level] {
-			errs = append(errs, fmt.Sprintf("invalid notice level %q (must be info, warning, or error)", level))
+			errs = append(errs, fmt.Sprintf("invalid notice level %q (must be %s)", level, strings.Join(NoticeLevels, ", ")))
 			continue
 		}
 		out = append(out, Notice{
@@ -211,12 +309,17 @@ func parseFile(path string) (*Change, error) {
 	}
 
 	var fm rawFrontmatter
-	if err := yaml.Unmarshal(m[1], &fm); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(m[1]))
+	dec.KnownFields(true) // a misspelt key must not be silently ignored
+	if err := dec.Decode(&fm); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("%s: invalid YAML: %w", filename, err)
 	}
 
 	if !validKinds[fm.Kind] {
 		return nil, fmt.Errorf("%s: kind must be %s, got %q", filename, KindList(), fm.Kind)
+	}
+	if errs := validateExtras(&fm); len(errs) > 0 {
+		return nil, fmt.Errorf("%s: %s", filename, strings.Join(errs, "; "))
 	}
 
 	breaking := false
@@ -285,12 +388,25 @@ func parseFile(path string) (*Change, error) {
 		Mandatory:      mandatory,
 		PR:             prNum,
 		PRExplicitNone: prExplicitNone,
+		Upgrade:        fm.Upgrade,
+		Advisories:     fm.Advisories,
+		Authors:        fm.Authors,
+		Yanks:          fm.Yanks,
 	}, nil
 }
 
-// invalidFilesErr aggregates per-file parse/validation errors into one error.
-func invalidFilesErr(errs []string) error {
-	return fmt.Errorf("invalid change files:\n  - %s", strings.Join(errs, "\n  - "))
+// InvalidFilesError aggregates per-file parse/validation errors. Findings keep
+// the file apart from the message so CI can annotate the right file.
+type InvalidFilesError struct {
+	Findings []Finding
+}
+
+func (e *InvalidFilesError) Error() string {
+	lines := make([]string, len(e.Findings))
+	for i, f := range e.Findings {
+		lines[i] = f.File + ": " + f.Message
+	}
+	return fmt.Sprintf("invalid change files:\n  - %s", strings.Join(lines, "\n  - "))
 }
 
 // parseAll parses each path into a Change, aggregating errors. When skipMissing
@@ -298,7 +414,7 @@ func invalidFilesErr(errs []string) error {
 func parseAll(paths []string, skipMissing bool) ([]*Change, error) {
 	var (
 		out  []*Change
-		errs []string
+		errs []Finding
 	)
 	for _, p := range paths {
 		ch, err := parseFile(p)
@@ -306,13 +422,14 @@ func parseAll(paths []string, skipMissing bool) ([]*Change, error) {
 			if skipMissing && errors.Is(err, os.ErrNotExist) {
 				continue
 			}
-			errs = append(errs, err.Error())
+			name := filepath.Base(p)
+			errs = append(errs, Finding{name, SeverityError, strings.TrimPrefix(err.Error(), name+": ")})
 			continue
 		}
 		out = append(out, ch)
 	}
 	if len(errs) > 0 {
-		return nil, invalidFilesErr(errs)
+		return nil, &InvalidFilesError{Findings: errs}
 	}
 	return out, nil
 }
@@ -330,8 +447,7 @@ func Read(root string) ([]*Change, error) {
 	var paths []string
 	for _, e := range entries {
 		name := e.Name()
-		lower := strings.ToLower(name)
-		if e.IsDir() || !strings.HasSuffix(lower, ".md") || lower == "readme.md" || lower == "_headline.md" {
+		if e.IsDir() || !IsChangeFileName(name) {
 			continue
 		}
 		paths = append(paths, filepath.Join(dir, name))
@@ -372,4 +488,31 @@ func ReadHeadline(root string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(data))
+}
+
+// ReadKnownIssues returns the items of .changes/_known-issues.md, one per
+// `- ` list item. Indented lines continue the previous item. A missing file
+// means no known issues.
+func ReadKnownIssues(root string) ([]string, error) {
+	data, err := os.ReadFile(filepath.Join(root, Dir, KnownIssuesFile))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", KnownIssuesFile, err)
+	}
+	var issues []string
+	for i, line := range strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case trimmed == "", strings.HasPrefix(trimmed, "#"):
+		case strings.HasPrefix(trimmed, "- "):
+			issues = append(issues, strings.TrimSpace(trimmed[2:]))
+		case line != trimmed && len(issues) > 0:
+			issues[len(issues)-1] += " " + trimmed
+		default:
+			return nil, fmt.Errorf("%s:%d: expected a `- ` list item, got %q", KnownIssuesFile, i+1, trimmed)
+		}
+	}
+	return issues, nil
 }

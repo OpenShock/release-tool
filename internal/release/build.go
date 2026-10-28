@@ -15,7 +15,10 @@ import (
 	"github.com/OpenShock/release-tool/internal/git"
 )
 
-const schemaVersion = 1
+// schemaVersion is bumped on any incompatible change to release.json.
+// 2: notice levels are GitHub alert types; adds audience, advisories, authors,
+// upgrade, known_issues, since_prerelease, yanks and first_time_contributors.
+const schemaVersion = 2
 
 type Repository struct {
 	Platform string `json:"platform"`
@@ -34,30 +37,51 @@ type ReleaseNoteEntry struct {
 }
 
 type ChangeEntry struct {
-	ID          string            `json:"id"`
-	Kind        string            `json:"kind"`
-	Breaking    bool              `json:"breaking"`
+	ID       string `json:"id"`
+	Kind     string `json:"kind"`
+	Breaking bool   `json:"breaking"`
+	// Audience is "user" for changes end users should see and "internal" for
+	// developer-only ones (chores). Update UIs show only "user" entries.
+	Audience    string            `json:"audience"`
 	Mandatory   bool              `json:"mandatory"`
 	Title       string            `json:"title"`
 	ReleaseNote *ReleaseNoteEntry `json:"release_note,omitempty"`
 	PR          *int              `json:"pr,omitempty"`
 	Notices     []NoticeEntry     `json:"notices"`
+	Advisories  []string          `json:"advisories,omitempty"`
+	Authors     []string          `json:"authors,omitempty"`
+}
+
+// PrereleaseDelta names the previous prerelease of the same cycle and the
+// changes (by id) that are new since it.
+type PrereleaseDelta struct {
+	Tag     string   `json:"tag"`
+	Changes []string `json:"changes"`
 }
 
 type ReleaseData struct {
-	SchemaVersion   int           `json:"schema_version"`
-	Repository      *Repository   `json:"repository,omitempty"`
-	Version         string        `json:"version"`
-	Tag             string        `json:"tag"`
-	Prerelease      bool          `json:"prerelease"`
-	PreviousVersion *string       `json:"previous_version,omitempty"`
-	PreviousTag     string        `json:"previous_tag,omitempty"`
-	ReleasedAt      string        `json:"released_at"`
-	Commit          string        `json:"commit"`
-	Mandatory       bool          `json:"mandatory"`
-	Headline        string        `json:"headline,omitempty"`
-	Changes         []ChangeEntry `json:"changes"`
-	Contributors    []string      `json:"contributors"`
+	SchemaVersion   int         `json:"schema_version"`
+	Repository      *Repository `json:"repository,omitempty"`
+	Version         string      `json:"version"`
+	Tag             string      `json:"tag"`
+	Prerelease      bool        `json:"prerelease"`
+	PreviousVersion *string     `json:"previous_version,omitempty"`
+	PreviousTag     string      `json:"previous_tag,omitempty"`
+	ReleasedAt      string      `json:"released_at"`
+	Commit          string      `json:"commit"`
+	Mandatory       bool        `json:"mandatory"`
+	Headline        string      `json:"headline,omitempty"`
+	// Upgrade aggregates the upgrade requirements of every change.
+	Upgrade *changes.Upgrade `json:"upgrade,omitempty"`
+	// Yanks lists earlier versions this release withdraws.
+	Yanks           []string         `json:"yanks,omitempty"`
+	SincePrerelease *PrereleaseDelta `json:"since_prerelease,omitempty"`
+	Changes         []ChangeEntry    `json:"changes"`
+	KnownIssues     []string         `json:"known_issues"`
+	Contributors    []string         `json:"contributors"`
+	// FirstTimeContributors is the subset of Contributors with no commit
+	// before the previous release.
+	FirstTimeContributors []string `json:"first_time_contributors"`
 }
 
 type BuildParams struct {
@@ -72,6 +96,61 @@ type BuildParams struct {
 	Root        string
 	EnrichPR    bool
 	GithubRepo  string // e.g. "OpenShock/Firmware" from GITHUB_REPOSITORY
+	KnownIssues []string
+	// PreviousPrerelease is the prerelease tag this one follows, and
+	// NewSincePrerelease the change filenames added after it.
+	PreviousPrerelease string
+	NewSincePrerelease []string
+}
+
+// audience maps a change kind to its release.json audience.
+func audience(kind string) string {
+	if kind == "chore" {
+		return "internal"
+	}
+	return "user"
+}
+
+// mergeUpgrade folds src into dst: flags are OR-ed and the highest minimum
+// version wins.
+func mergeUpgrade(dst *changes.Upgrade, src changes.Upgrade) {
+	dst.USBOnly = dst.USBOnly || src.USBOnly
+	dst.ConfigReset = dst.ConfigReset || src.ConfigReset
+	dst.NoDowngrade = dst.NoDowngrade || src.NoDowngrade
+	if src.MinVersion != "" && (dst.MinVersion == "" || versionLess(dst.MinVersion, src.MinVersion)) {
+		dst.MinVersion = src.MinVersion
+	}
+}
+
+// versionLess compares the MAJOR.MINOR.PATCH cores of a and b.
+func versionLess(a, b string) bool {
+	am, an, ap, aErr := ParseVersion(a)
+	bm, bn, bp, bErr := ParseVersion(b)
+	if aErr != nil || bErr != nil {
+		return a < b
+	}
+	if am != bm {
+		return am < bm
+	}
+	if an != bn {
+		return an < bn
+	}
+	return ap < bp
+}
+
+// appendUnique appends the items of add not already in list (case-insensitive).
+func appendUnique(list []string, add ...string) []string {
+	seen := make(map[string]bool, len(list))
+	for _, s := range list {
+		seen[strings.ToLower(s)] = true
+	}
+	for _, s := range add {
+		if k := strings.ToLower(s); s != "" && !seen[k] {
+			seen[k] = true
+			list = append(list, s)
+		}
+	}
+	return list
 }
 
 func parseRepository(githubRepo string) *Repository {
@@ -144,21 +223,31 @@ func BuildData(p BuildParams) *ReleaseData {
 		data.PreviousTag = p.PreviousTag
 	}
 
+	data.KnownIssues = append([]string{}, p.KnownIssues...)
+
 	// addedAt orders entries by when their change file was committed.
 	addedAt := make([]int64, 0, len(p.Changes))
+	var upgrade changes.Upgrade
+	var authors []string
 
 	for _, c := range p.Changes {
 		if c.Mandatory {
 			data.Mandatory = true
 		}
+		mergeUpgrade(&upgrade, c.Upgrade)
+		data.Yanks = appendUnique(data.Yanks, c.Yanks...)
+		authors = appendUnique(authors, c.Authors...)
 		entry := ChangeEntry{
 			ID:          c.Slug(),
 			Kind:        c.Kind,
 			Breaking:    c.Breaking,
+			Audience:    audience(c.Kind),
 			Mandatory:   c.Mandatory,
 			Title:       c.Title,
 			ReleaseNote: releaseNote(c.ReleaseNote),
 			Notices:     make([]NoticeEntry, len(c.Notices)),
+			Advisories:  c.Advisories,
+			Authors:     c.Authors,
 		}
 		for i, n := range c.Notices {
 			entry.Notices[i] = NoticeEntry{Level: n.Level, Message: n.Message}
@@ -223,10 +312,36 @@ func BuildData(p BuildParams) *ReleaseData {
 		data.Changes = sorted
 	}
 
+	if !upgrade.IsZero() {
+		data.Upgrade = &upgrade
+	}
+
+	if p.PreviousPrerelease != "" {
+		isNew := make(map[string]bool, len(p.NewSincePrerelease))
+		for _, f := range p.NewSincePrerelease {
+			isNew[f] = true
+		}
+		delta := &PrereleaseDelta{Tag: p.PreviousPrerelease, Changes: []string{}}
+		for _, e := range data.Changes {
+			if isNew[e.ID+".md"] {
+				delta.Changes = append(delta.Changes, e.ID)
+			}
+		}
+		data.SincePrerelease = delta
+	}
+
 	data.Contributors = []string{}
+	data.FirstTimeContributors = []string{}
 	if p.EnrichPR && p.PreviousTag != "" {
 		if c := git.ContributorsSince(p.Root, p.PreviousTag); c != nil {
 			data.Contributors = c
+		}
+	}
+	// Credited authors count even when the commit author is someone else.
+	data.Contributors = appendUnique(data.Contributors, authors...)
+	if p.EnrichPR && p.PreviousTag != "" {
+		if f := git.FirstTimeContributors(p.Root, p.PreviousTag, data.Contributors); f != nil {
+			data.FirstTimeContributors = f
 		}
 	}
 
@@ -245,8 +360,8 @@ func WriteJSON(path string, data *ReleaseData) error {
 	return nil
 }
 
-func WriteNotes(path string, data *ReleaseData, maintainers map[string]bool) error {
-	content := RenderNotes(data, maintainers)
+func WriteNotes(path string, data *ReleaseData, opts NotesOptions) error {
+	content := RenderNotes(data, opts)
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}

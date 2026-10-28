@@ -7,6 +7,7 @@ import (
 
 	"github.com/OpenShock/release-tool/internal/changes"
 	"github.com/OpenShock/release-tool/internal/git"
+	"github.com/OpenShock/release-tool/internal/release"
 	"github.com/spf13/cobra"
 )
 
@@ -134,6 +135,15 @@ func enrichment(root string, cfg *changes.Config, latest string, dryRun bool) (p
 		}
 	}
 	return prevTag, maintainers
+}
+
+// notesOptions builds the release body options from the repo config.
+func notesOptions(cfg *changes.Config, maintainers map[string]bool) release.NotesOptions {
+	return release.NotesOptions{
+		Maintainers:      maintainers,
+		PrereleaseNotice: cfg.PrereleaseNotice,
+		FoldAfter:        cfg.FoldAfter,
+	}
 }
 
 func writeGitHubOutputSkip() {

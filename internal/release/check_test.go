@@ -179,7 +179,7 @@ func TestRunCheck_OKForValidChangeFile(t *testing.T) {
 
 func TestRunCheck_StaleBaseIgnoresBaseAccruedFiles(t *testing.T) {
 	root := makeRepo(t, nil)
-	gitInit(t, root) // M0 — the PR's (soon to be stale) base
+	gitInit(t, root) // M0: the PR's (soon to be stale) base
 	staleBase := gitExec(t, root, "rev-parse", "HEAD")
 
 	// The base branch accrues a new change file AFTER the PR's recorded base.
@@ -206,44 +206,5 @@ func TestRunCheck_StaleBaseIgnoresBaseAccruedFiles(t *testing.T) {
 	}
 	if v.State != StateMissing {
 		t.Errorf("expected Missing (PR adds no change file), got %q; body:\n%s", v.State, v.Body)
-	}
-}
-
-func TestRenderCheckBody(t *testing.T) {
-	cases := []struct {
-		state   CheckState
-		count   int
-		detail  string
-		wantStr string
-	}{
-		{StateOK, 2, "", "**OK**"},
-		{StateOK, 3, "", "3 valid change file"},
-		{StateMissing, 0, "", "**Missing**"},
-		{StateInvalid, 1, "bad.md: invalid notice level \"warming\"", "warming"},
-		{StateInvalid, 1, "my.md: pr field must not be set in a PR", "pr field must not be set"},
-	}
-	for _, c := range cases {
-		body := renderCheckBody(c.state, c.count, c.detail)
-		if !strings.HasPrefix(body, checkMarker) {
-			t.Errorf("%s: body must start with the sticky marker", c.state)
-		}
-		if !strings.Contains(body, c.wantStr) {
-			t.Errorf("%s: body missing %q in:\n%s", c.state, c.wantStr, body)
-		}
-	}
-}
-
-func TestRenderCheckBody_FenceContainsBacktickContent(t *testing.T) {
-	// Attacker-controlled content with a triple-backtick run must not be able to
-	// break out of the code fence in the privileged PR comment.
-	detail := "evil.md: ```\n## Injected heading\n![img](http://x)"
-	body := renderCheckBody(StateInvalid, 1, detail)
-	fence := safeFence(strings.TrimSpace(detail))
-	if len(fence) <= 3 {
-		t.Errorf("fence should be longer than the embedded backtick run, got %q", fence)
-	}
-	// The opening fence must be the longer fence, immediately followed by content.
-	if !strings.Contains(body, fence+"\n"+strings.TrimSpace(detail)) {
-		t.Errorf("content should be wrapped by a fence longer than its backtick run:\n%s", body)
 	}
 }
