@@ -2,7 +2,7 @@
   "tag_prefix": "v",
   "branches": {
     "master": { "release": "stable" },
-    "alpha": { "release": "prerelease", "label": "alpha" }
+    "develop": { "release": "none", "label": "develop", "sha": true }
   },
   "maintainers": ["hhvrc", "LucHeart", "nullstalgia"]
 }

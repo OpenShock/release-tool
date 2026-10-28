@@ -1,6 +1,6 @@
 on:
   push:
-    branches: [master, alpha]
+    branches: [master]
     paths-ignore:
       - 'CHANGELOG.md'
       - '.changes/**'
@@ -19,7 +19,8 @@ jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: github.actor != 'github-actions[bot]'
+    # Releases are only cut from master, including manual dispatches.
+    if: github.actor != 'github-actions[bot]' && github.ref_name == 'master'
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
