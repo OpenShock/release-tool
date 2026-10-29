@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/OpenShock/release-tool/internal/changes"
 	"github.com/OpenShock/release-tool/internal/git"
@@ -34,6 +35,8 @@ type releaseOptions struct {
 	noTag           bool
 	// version overrides the computed stable version (stable releases only).
 	version string
+	// releasedAt is the release time, from SOURCE_DATE_EPOCH; zero means now.
+	releasedAt time.Time
 }
 
 var rootCmd = &cobra.Command{

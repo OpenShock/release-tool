@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/OpenShock/release-tool/internal/changes"
 )
@@ -62,6 +63,14 @@ func TestBuildData_Fields(t *testing.T) {
 	}
 	if data.ReleasedAt == "" {
 		t.Error("ReleasedAt should not be empty")
+	}
+}
+
+func TestBuildData_ReleasedAt(t *testing.T) {
+	at := time.Date(2026, 10, 29, 8, 10, 59, 0, time.FixedZone("CET", 3600))
+	data := BuildData(BuildParams{Tag: "1.0.0", ReleasedAt: at})
+	if data.ReleasedAt != "2026-10-29T07:10:59Z" {
+		t.Errorf("ReleasedAt: got %q", data.ReleasedAt)
 	}
 }
 

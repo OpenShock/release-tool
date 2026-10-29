@@ -2,6 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"strconv"
+	"time"
 
 	"github.com/OpenShock/release-tool/internal/changes"
 	"github.com/OpenShock/release-tool/internal/git"
@@ -29,7 +32,12 @@ var releaseCmd = &cobra.Command{
 			return fmt.Errorf("branch %q is not listed in .changes/config.json", branch)
 		}
 
-		opts := releaseOptions{dryRun: dryRun, output: output, notes: notes, version: version}
+		releasedAt, err := sourceDateEpoch()
+		if err != nil {
+			return err
+		}
+
+		opts := releaseOptions{dryRun: dryRun, output: output, notes: notes, version: version, releasedAt: releasedAt}
 		if version != "" && bcfg.Release != changes.ReleaseModeStable {
 			return fmt.Errorf("--version only applies to stable releases; branch %q is %q", branch, bcfg.Release)
 		}
@@ -56,4 +64,19 @@ func init() {
 	releaseCmd.Flags().StringVar(&output, "output", "release.json", "Path to write release.json")
 	releaseCmd.Flags().StringVar(&notes, "notes", "", "Path to write markdown release notes")
 	releaseCmd.Flags().StringVar(&version, "version", "", "Release this MAJOR.MINOR.PATCH instead of the computed version (stable only; not below it)")
+}
+
+// sourceDateEpoch reads SOURCE_DATE_EPOCH (Unix seconds), the release time to
+// record instead of now, so a release can be replayed byte for byte. Unset
+// returns the zero time.
+func sourceDateEpoch() (time.Time, error) {
+	v := os.Getenv("SOURCE_DATE_EPOCH")
+	if v == "" {
+		return time.Time{}, nil
+	}
+	secs, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("SOURCE_DATE_EPOCH %q is not a Unix timestamp", v)
+	}
+	return time.Unix(secs, 0), nil
 }

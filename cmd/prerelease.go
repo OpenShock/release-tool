@@ -191,6 +191,7 @@ func runPrerelease(opts releaseOptions) error {
 		Root:               root,
 		EnrichPR:           !opts.dryRun,
 		GithubRepo:         githubRepo,
+		ReleasedAt:         opts.releasedAt,
 	})
 
 	if opts.dryRun {

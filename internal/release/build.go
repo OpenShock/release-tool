@@ -101,6 +101,8 @@ type BuildParams struct {
 	// NewSincePrerelease the change filenames added after it.
 	PreviousPrerelease string
 	NewSincePrerelease []string
+	// ReleasedAt is the release time; zero means now.
+	ReleasedAt time.Time
 }
 
 // audience maps a change kind to its release.json audience.
@@ -205,13 +207,17 @@ func splitTitlePR(title string) (string, int) {
 const uncommitted = math.MaxInt64
 
 func BuildData(p BuildParams) *ReleaseData {
+	releasedAt := p.ReleasedAt
+	if releasedAt.IsZero() {
+		releasedAt = time.Now()
+	}
 	data := &ReleaseData{
 		SchemaVersion: schemaVersion,
 		Repository:    parseRepository(p.GithubRepo),
 		Version:       p.Version,
 		Tag:           p.Tag,
 		Prerelease:    p.Prerelease,
-		ReleasedAt:    time.Now().UTC().Truncate(time.Second).Format(time.RFC3339),
+		ReleasedAt:    releasedAt.UTC().Truncate(time.Second).Format(time.RFC3339),
 		Commit:        p.Commit,
 		Headline:      strings.TrimSpace(p.Headline),
 	}

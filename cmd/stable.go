@@ -96,6 +96,7 @@ func runRelease(opts releaseOptions) error {
 		Root:        root,
 		EnrichPR:    !opts.dryRun,
 		GithubRepo:  githubRepo,
+		ReleasedAt:  opts.releasedAt,
 	})
 
 	entry := release.RenderChangelog(data, githubRepo)
