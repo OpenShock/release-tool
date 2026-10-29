@@ -387,13 +387,15 @@ Prints pending change files and the next version that would be created. No files
 ### `release`
 
 ```sh
-release-tool release [--dry-run] [--output release.json] [--notes release-notes.md]
+release-tool release [--dry-run] [--output release.json] [--notes release-notes.md] [--version 1.0.1]
 ```
 
 Reads the current branch from config and dispatches:
 - `stable` → consume changes, write changelog, create tag
 - `prerelease` → create tag, leave change files
 - `none` → write release data only, no tag
+
+`--version` overrides the computed version on a stable branch, e.g. to skip a tag name GitHub no longer accepts (one that belonged to a deleted immutable release). It may skip ahead but not below what the pending changes require.
 
 ### `prerelease`
 
@@ -421,6 +423,7 @@ Writes a verdict JSON used by the PR comment stage. Exit code is non-zero on `in
     output: release.json
     notes-output: release-notes.md
     dry-run: false
+    version: ''   # stable only: override the computed version
     # check mode:
     base-ref: ${{ github.event.pull_request.base.ref }}
     base-sha: ${{ github.event.pull_request.base.sha }}

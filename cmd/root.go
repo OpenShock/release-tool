@@ -17,6 +17,7 @@ var (
 	notes           string
 	prereleaseLabel string
 	gitSHA          bool
+	version         string
 	rootDir         string
 )
 
@@ -31,6 +32,8 @@ type releaseOptions struct {
 	prereleaseLabel string
 	gitSHA          bool
 	noTag           bool
+	// version overrides the computed stable version (stable releases only).
+	version string
 }
 
 var rootCmd = &cobra.Command{

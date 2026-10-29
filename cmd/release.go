@@ -29,7 +29,10 @@ var releaseCmd = &cobra.Command{
 			return fmt.Errorf("branch %q is not listed in .changes/config.json", branch)
 		}
 
-		opts := releaseOptions{dryRun: dryRun, output: output, notes: notes}
+		opts := releaseOptions{dryRun: dryRun, output: output, notes: notes, version: version}
+		if version != "" && bcfg.Release != changes.ReleaseModeStable {
+			return fmt.Errorf("--version only applies to stable releases; branch %q is %q", branch, bcfg.Release)
+		}
 
 		switch bcfg.Release {
 		case changes.ReleaseModeStable:
@@ -52,4 +55,5 @@ func init() {
 	releaseCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview without making changes")
 	releaseCmd.Flags().StringVar(&output, "output", "release.json", "Path to write release.json")
 	releaseCmd.Flags().StringVar(&notes, "notes", "", "Path to write markdown release notes")
+	releaseCmd.Flags().StringVar(&version, "version", "", "Release this MAJOR.MINOR.PATCH instead of the computed version (stable only; not below it)")
 }

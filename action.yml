@@ -27,6 +27,13 @@ inputs:
     description: Path to write markdown release notes (relative to the consuming repo root)
     required: false
     default: ''
+  version:
+    description: >
+      release mode, stable branches only: release this MAJOR.MINOR.PATCH instead
+      of the computed version. It may skip ahead (e.g. past a tag GitHub no
+      longer accepts) but not below what the pending changes require.
+    required: false
+    default: ''
   base-ref:
     description: "check mode: PR base branch name (resolved via config.json branches)"
     required: false
@@ -147,6 +154,7 @@ runs:
         RELEASE_MODE: ${{ inputs.mode }}
         RELEASE_OUTPUT: ${{ inputs.output }}
         RELEASE_NOTES: ${{ inputs.notes-output }}
+        RELEASE_VERSION: ${{ inputs.version }}
         WORKSPACE: ${{ github.workspace }}
         BASE_REF: ${{ inputs.base-ref }}
         BASE_SHA: ${{ inputs.base-sha }}
@@ -158,6 +166,7 @@ runs:
           release)
             ARGS=(--root "$WORKSPACE" --output "$WORKSPACE/$RELEASE_OUTPUT")
             [ -n "$RELEASE_NOTES" ] && ARGS+=(--notes "$WORKSPACE/$RELEASE_NOTES")
+            [ -n "$RELEASE_VERSION" ] && ARGS+=(--version "$RELEASE_VERSION")
             [ "$DRY_RUN" = "true" ] && ARGS+=(--dry-run)
             "$BIN" release "${ARGS[@]}"
             ;;

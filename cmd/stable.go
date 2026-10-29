@@ -66,6 +66,11 @@ func runRelease(opts releaseOptions) error {
 	if err != nil {
 		return err
 	}
+	if opts.version != "" {
+		if base, err = release.OverrideVersion(opts.version, cfg.TagPrefix, base); err != nil {
+			return err
+		}
+	}
 
 	tag := cfg.TagPrefix + base
 

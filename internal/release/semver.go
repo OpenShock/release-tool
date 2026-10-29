@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/OpenShock/release-tool/internal/changes"
 )
@@ -61,4 +62,23 @@ func ComputeNext(ch []*changes.Change, latest string) (string, error) {
 	}
 	maj, min, pat = BumpVersion(maj, min, pat, HighestBump(ch))
 	return fmt.Sprintf("%d.%d.%d", maj, min, pat), nil
+}
+
+var exactVersionRe = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
+
+// OverrideVersion validates a manually chosen stable version, given with or
+// without the tag prefix, against next, the version the pending changes call
+// for. It may skip ahead of next (e.g. past a tag name GitHub will no longer
+// accept) but never below it, so the bump the changes require is kept.
+func OverrideVersion(v, tagPrefix, next string) (string, error) {
+	if tagPrefix != "" {
+		v = strings.TrimPrefix(v, tagPrefix)
+	}
+	if !exactVersionRe.MatchString(v) {
+		return "", fmt.Errorf("version override %q must be MAJOR.MINOR.PATCH", v)
+	}
+	if versionLess(v, next) {
+		return "", fmt.Errorf("version override %s is below %s, which the pending changes require", v, next)
+	}
+	return v, nil
 }

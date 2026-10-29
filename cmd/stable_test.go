@@ -87,3 +87,24 @@ func TestRunRelease_RollsBackOnTagFailure(t *testing.T) {
 		t.Errorf("working tree should be clean after rollback, got:\n%s", st)
 	}
 }
+
+// TestRunRelease_VersionOverride tags the overridden version instead of the
+// computed one (0.1.0 for the seeded "added" change).
+func TestRunRelease_VersionOverride(t *testing.T) {
+	root := releaseRepo(t, "v")
+
+	prev := rootDir
+	rootDir = root
+	t.Cleanup(func() { rootDir = prev })
+
+	err := runRelease(releaseOptions{output: filepath.Join(t.TempDir(), "release.json"), version: "v0.1.1"})
+	if err != nil {
+		t.Fatalf("runRelease: %v", err)
+	}
+	if tags := gitCmd(t, root, "tag"); tags != "v0.1.1" {
+		t.Errorf("tags = %q, want v0.1.1", tags)
+	}
+	if subj := gitCmd(t, root, "log", "-1", "--format=%s"); subj != "chore: release v0.1.1" {
+		t.Errorf("release commit subject = %q", subj)
+	}
+}

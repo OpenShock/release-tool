@@ -5,6 +5,11 @@ on:
       - 'CHANGELOG.md'
       - '.changes/**'
   workflow_dispatch:
+    inputs:
+      version:
+        description: Release this version instead of the computed one (e.g. 1.0.1)
+        required: false
+        default: ''
 
 name: release
 
@@ -56,6 +61,7 @@ jobs:
         with:
           mode: release
           notes-output: release-notes.md
+          version: ${{ inputs.version }}
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
 

@@ -135,3 +135,37 @@ func TestComputeNext(t *testing.T) {
 		})
 	}
 }
+
+func TestOverrideVersion(t *testing.T) {
+	cases := []struct {
+		name, v, prefix, next, want string
+		wantErr                     bool
+	}{
+		{"equal to next", "1.0.0", "v", "1.0.0", "1.0.0", false},
+		{"skips ahead", "1.0.1", "v", "1.0.0", "1.0.1", false},
+		{"strips prefix", "v1.0.1", "v", "1.0.0", "1.0.1", false},
+		{"no prefix configured", "2.0.0", "", "1.0.0", "2.0.0", false},
+		{"below next", "0.9.9", "v", "1.0.0", "", true},
+		{"below next patch", "1.0.0", "v", "1.0.1", "", true},
+		{"prerelease rejected", "1.0.1-rc.1", "v", "1.0.0", "", true},
+		{"partial rejected", "1.0", "v", "1.0.0", "", true},
+		{"garbage rejected", "latest", "v", "1.0.0", "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := OverrideVersion(tc.v, tc.prefix, tc.next)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("expected error, got %q", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
