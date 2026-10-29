@@ -9,7 +9,19 @@ import (
 	"github.com/OpenShock/release-tool/internal/changes"
 	"github.com/OpenShock/release-tool/internal/git"
 	"github.com/OpenShock/release-tool/internal/release"
+	"github.com/OpenShock/release-tool/internal/versionfile"
 )
+
+// validateVersionFiles rejects bad version_files entries before a release
+// touches the working tree.
+func validateVersionFiles(cfg *changes.Config) error {
+	for _, f := range cfg.VersionFiles {
+		if err := f.Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func runRelease(opts releaseOptions) error {
 	root := projectRoot()
@@ -97,6 +109,9 @@ func runRelease(opts releaseOptions) error {
 	if !git.IdentityConfigured(root) {
 		return fmt.Errorf("no git committer identity configured; set user.name and user.email (or GIT_AUTHOR_*/GIT_COMMITTER_* env) before releasing")
 	}
+	if err := validateVersionFiles(cfg); err != nil {
+		return err
+	}
 
 	if err := release.WriteJSON(opts.output, data); err != nil {
 		return err
@@ -137,6 +152,11 @@ func runRelease(opts releaseOptions) error {
 	// failed move is fatal: a file left behind would double-count on the next
 	// release. Known issues stay until someone removes them.
 	staged := []string{"CHANGELOG.md"}
+	versioned, err := versionfile.Update(root, cfg.VersionFiles, base)
+	if err != nil {
+		return rollback(err)
+	}
+	staged = append(staged, versioned...)
 	archiveRel := filepath.Join(changes.Dir, changes.ArchiveDir, base)
 	if err := os.MkdirAll(filepath.Join(root, archiveRel), 0755); err != nil {
 		return rollback(fmt.Errorf("creating %s: %w", archiveRel, err))

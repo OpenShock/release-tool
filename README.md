@@ -62,8 +62,8 @@ When a push lands on a configured branch, `release-tool release` reads the branc
 
 | `release` value | Behaviour |
 |---|---|
-| `stable` | Computes next semver, writes `CHANGELOG.md`, moves consumed change files to `.changes/released/<version>/`, commits, creates tag |
-| `prerelease` | Computes next semver + label (e.g. `1.2.0-beta.3`), writes release data, creates tag; change files stay |
+| `stable` | Computes next semver, writes `CHANGELOG.md` and the `version_files`, moves consumed change files to `.changes/released/<version>/`, commits, creates tag |
+| `prerelease` | Computes next semver + label (e.g. `1.2.0-beta.3`), writes release data, commits the `version_files`, creates tag; change files stay |
 | `none` | Computes version with SHA metadata (e.g. `1.2.0-develop+gabc123`), writes release data, **no git tag, no changelog** |
 
 If there are no change files since the last stable tag, the tool exits with `skip=true` and does nothing.
@@ -256,6 +256,18 @@ Add the `no-changelog` label to a PR to skip the check for intentional non-relea
   "fold_after": 10
 }
 ```
+
+## Version files
+
+List files that record the project version under `version_files`, and every release sets them to the released version (without `tag_prefix`) in its release commit:
+
+```json
+{
+  "version_files": [{ "path": "frontend/package.json", "json_key": "version" }]
+}
+```
+
+`json_key` names a top-level string field of a JSON object. Only that value is rewritten, so the file's formatting stays as it was. A stable release puts the files in its `chore: release <tag>` commit. A prerelease, which otherwise makes no commit, commits them as `chore: release <tag>` and tags that commit; push it together with the tag (`OpenShock/actions/publish-tag` pushes `HEAD` and the tag). SHA builds (`--git-sha`) and `none` branches never touch them. A bad entry fails the release before anything is written.
 
 ## Change file format
 

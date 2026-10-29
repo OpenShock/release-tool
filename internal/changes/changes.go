@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/OpenShock/release-tool/internal/versionfile"
 	"gopkg.in/yaml.v3"
 )
 
@@ -67,6 +68,9 @@ type Config struct {
 	// FoldAfter folds a release body section with more than this many entries
 	// into a collapsed <details> block. 0 uses the default; negative disables.
 	FoldAfter int `json:"fold_after,omitempty"`
+	// VersionFiles are set to the released version in the release commit, by
+	// stable releases and by prereleases that are not SHA builds.
+	VersionFiles []versionfile.File `json:"version_files,omitempty"`
 }
 
 func ReadConfig(root string) (*Config, error) {

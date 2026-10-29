@@ -117,3 +117,98 @@ func TestRunPrerelease_DeltaSincePreviousRC(t *testing.T) {
 		t.Errorf("prerelease notes stay cumulative since the last stable, got %d changes", len(data.Changes))
 	}
 }
+
+// versionFilesRepo is releaseRepo with frontend/package.json listed under
+// version_files.
+func versionFilesRepo(t *testing.T) string {
+	t.Helper()
+	root := releaseRepo(t, "v")
+	mustWrite(t, filepath.Join(root, ".changes", "config.json"),
+		`{"tag_prefix":"v","branches":{"master":{"release":"stable"}},"version_files":[{"path":"frontend/package.json","json_key":"version"}]}`)
+	mustWrite(t, filepath.Join(root, "frontend", "package.json"), "{\n\t\"name\": \"frontend\",\n\t\"version\": \"0.0.0\"\n}\n")
+	gitCmd(t, root, "add", "-A")
+	gitCmd(t, root, "commit", "-m", "version files")
+	useRoot(t, root)
+	return root
+}
+
+func readVersion(t *testing.T, root string) string {
+	t.Helper()
+	var pkg struct{ Version string }
+	raw, err := os.ReadFile(filepath.Join(root, "frontend", "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &pkg); err != nil {
+		t.Fatal(err)
+	}
+	return pkg.Version
+}
+
+func TestRunRelease_SetsVersionFiles(t *testing.T) {
+	root := versionFilesRepo(t)
+	if err := runRelease(releaseOptions{output: filepath.Join(t.TempDir(), "release.json")}); err != nil {
+		t.Fatal(err)
+	}
+	if v := readVersion(t, root); v != "0.1.0" {
+		t.Errorf("package.json version = %q, want 0.1.0 (no tag prefix)", v)
+	}
+	if st := gitCmd(t, root, "status", "--porcelain"); st != "" {
+		t.Errorf("version file should be in the release commit, got:\n%s", st)
+	}
+	if files := gitCmd(t, root, "show", "--name-only", "--format=", "v0.1.0"); !strings.Contains(files, "frontend/package.json") {
+		t.Errorf("tagged release commit does not touch package.json:\n%s", files)
+	}
+}
+
+func TestRunPrerelease_CommitsVersionFiles(t *testing.T) {
+	root := versionFilesRepo(t)
+	start := gitCmd(t, root, "rev-parse", "HEAD")
+	if err := runPrerelease(releaseOptions{output: filepath.Join(t.TempDir(), "release.json"), prereleaseLabel: "rc"}); err != nil {
+		t.Fatal(err)
+	}
+	if v := readVersion(t, root); v != "0.1.0-rc.1" {
+		t.Errorf("package.json version = %q, want 0.1.0-rc.1", v)
+	}
+	if subj := gitCmd(t, root, "log", "-1", "--format=%s"); subj != "chore: release v0.1.0-rc.1" {
+		t.Errorf("release commit subject = %q", subj)
+	}
+	if parent := gitCmd(t, root, "rev-parse", "HEAD~1"); parent != start {
+		t.Errorf("expected exactly one release commit on top of %s", start)
+	}
+	if tagged, head := gitCmd(t, root, "rev-parse", "v0.1.0-rc.1^{commit}"), gitCmd(t, root, "rev-parse", "HEAD"); tagged != head {
+		t.Errorf("tag points at %s, want the release commit %s", tagged, head)
+	}
+}
+
+func TestRunPrerelease_SHABuildLeavesVersionFiles(t *testing.T) {
+	root := versionFilesRepo(t)
+	start := gitCmd(t, root, "rev-parse", "HEAD")
+	if err := runPrerelease(releaseOptions{output: filepath.Join(t.TempDir(), "release.json"), prereleaseLabel: "develop", gitSHA: true}); err != nil {
+		t.Fatal(err)
+	}
+	if v := readVersion(t, root); v != "0.0.0" {
+		t.Errorf("SHA build changed package.json to %q", v)
+	}
+	if head := gitCmd(t, root, "rev-parse", "HEAD"); head != start {
+		t.Errorf("SHA build made a commit")
+	}
+}
+
+func TestRunPrerelease_RollsBackVersionCommitOnTagFailure(t *testing.T) {
+	root := versionFilesRepo(t)
+	start := gitCmd(t, root, "rev-parse", "HEAD")
+	// refs/tags/v0.1.0-rc.1 cannot be created while refs/tags/v0.1.0-rc.1/ is a
+	// directory, so CreateTag fails after the release commit was made.
+	gitCmd(t, root, "tag", "v0.1.0-rc.1/blocker")
+	err := runPrerelease(releaseOptions{output: filepath.Join(t.TempDir(), "release.json"), prereleaseLabel: "rc"})
+	if err == nil {
+		t.Fatal("expected CreateTag to fail")
+	}
+	if head := gitCmd(t, root, "rev-parse", "HEAD"); head != start {
+		t.Errorf("release commit was not rolled back")
+	}
+	if v := readVersion(t, root); v != "0.0.0" {
+		t.Errorf("package.json not restored, version = %q", v)
+	}
+}

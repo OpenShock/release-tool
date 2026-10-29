@@ -4,12 +4,51 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/OpenShock/release-tool/internal/changes"
 	"github.com/OpenShock/release-tool/internal/git"
 	"github.com/OpenShock/release-tool/internal/release"
+	"github.com/OpenShock/release-tool/internal/versionfile"
 	"github.com/spf13/cobra"
 )
+
+// commitVersionFiles sets the configured version files to version and commits
+// them as the release commit for tag. Nothing is committed when no file
+// changes. On failure the working tree is reset to where it started.
+func commitVersionFiles(root string, cfg *changes.Config, version, tag string) error {
+	if len(cfg.VersionFiles) == 0 {
+		return nil
+	}
+	if !git.IdentityConfigured(root) {
+		return fmt.Errorf("no git committer identity configured; set user.name and user.email (or GIT_AUTHOR_*/GIT_COMMITTER_* env) before releasing")
+	}
+	head, err := git.CurrentCommit(root)
+	if err != nil {
+		return err
+	}
+	rollback := func(cause error) error {
+		if rbErr := git.ResetHard(root, head); rbErr != nil {
+			return fmt.Errorf("%w (rollback to %s also failed: %v)", cause, head, rbErr)
+		}
+		return cause
+	}
+	changed, err := versionfile.Update(root, cfg.VersionFiles, version)
+	if err != nil {
+		return rollback(err)
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+	if err := git.Add(root, changed...); err != nil {
+		return rollback(err)
+	}
+	if err := git.Commit(root, "chore: release "+tag); err != nil {
+		return rollback(err)
+	}
+	fmt.Fprintf(os.Stderr, "Set version %s in %s\n", version, strings.Join(changed, ", "))
+	return nil
+}
 
 var prereleaseCmd = &cobra.Command{
 	Use:   "prerelease",
@@ -108,6 +147,11 @@ func runPrerelease(opts releaseOptions) error {
 			writeGitHubOutputSkip()
 			return nil
 		}
+		if !opts.gitSHA {
+			if err := validateVersionFiles(cfg); err != nil {
+				return err
+			}
+		}
 	}
 
 	commit, err := git.CurrentCommit(root)
@@ -169,7 +213,17 @@ func runPrerelease(opts releaseOptions) error {
 		writeGitHubOutputs("", tag, latest, true)
 		return nil
 	}
+	// A SHA build's tag names the commit it was cut from, so it gets no
+	// release commit; every other prerelease records its version in one.
+	if !opts.gitSHA {
+		if err := commitVersionFiles(root, cfg, strings.TrimPrefix(tag, cfg.TagPrefix), tag); err != nil {
+			return err
+		}
+	}
 	if err := git.CreateTag(root, tag); err != nil {
+		if rbErr := git.ResetHard(root, commit); rbErr != nil {
+			return fmt.Errorf("%w (rollback to %s also failed: %v)", err, commit, rbErr)
+		}
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "Created tag: %s\n", tag)
