@@ -267,7 +267,7 @@ List files that record the project version under `version_files`, and every rele
 }
 ```
 
-`json_key` names a top-level string field of a JSON object. Only that value is rewritten, so the file's formatting stays as it was. A stable release puts the files in its `chore: release <tag>` commit. A prerelease, which otherwise makes no commit, commits them as `chore: release <tag>` and tags that commit; push it together with the tag (`OpenShock/actions/publish-tag` pushes `HEAD` and the tag). SHA builds (`--git-sha`) and `none` branches never touch them. A bad entry fails the release before anything is written.
+`json_key` names a top-level string field of a JSON object. Only that value is rewritten, so the file's formatting (indentation, line endings, a UTF-8 BOM) stays as it was. Several entries may name the same file. The file must be tracked by git and be valid JSON, and the key must appear exactly once. A stable release puts the files in its `chore: release <tag>` commit. A prerelease, which otherwise makes no commit, commits them as `chore: release <tag>` and tags that commit; push it together with the tag (`OpenShock/actions/publish-tag` pushes `HEAD` and the tag). SHA builds (`--git-sha`) and `none` branches never touch them. A bad entry fails the release before anything is written.
 
 ## Change file format
 

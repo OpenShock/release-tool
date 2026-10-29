@@ -99,6 +99,12 @@ func CreateTag(root, tag string) error {
 	return err
 }
 
+// Tracked reports whether path (relative to root) is tracked by git.
+func Tracked(root, path string) bool {
+	_, err := run(root, "ls-files", "--error-unmatch", "--", path)
+	return err == nil
+}
+
 // TagExists reports whether tag already exists in the repo.
 func TagExists(root, tag string) (bool, error) {
 	cmd := exec.Command("git", "rev-parse", "-q", "--verify", "refs/tags/"+tag)

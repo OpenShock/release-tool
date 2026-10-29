@@ -13,11 +13,16 @@ import (
 )
 
 // validateVersionFiles rejects bad version_files entries before a release
-// touches the working tree.
-func validateVersionFiles(cfg *changes.Config) error {
+// touches the working tree. Each file must be tracked: a rollback (git reset
+// --hard) cannot restore an untracked or ignored file, and the release commit
+// should not add one.
+func validateVersionFiles(root string, cfg *changes.Config) error {
 	for _, f := range cfg.VersionFiles {
 		if err := f.Validate(); err != nil {
 			return err
+		}
+		if !git.Tracked(root, f.Path) {
+			return fmt.Errorf("version_files: %s is not tracked by git", f.Path)
 		}
 	}
 	return nil
@@ -109,7 +114,7 @@ func runRelease(opts releaseOptions) error {
 	if !git.IdentityConfigured(root) {
 		return fmt.Errorf("no git committer identity configured; set user.name and user.email (or GIT_AUTHOR_*/GIT_COMMITTER_* env) before releasing")
 	}
-	if err := validateVersionFiles(cfg); err != nil {
+	if err := validateVersionFiles(root, cfg); err != nil {
 		return err
 	}
 
@@ -135,6 +140,14 @@ func runRelease(opts releaseOptions) error {
 		return cause
 	}
 
+	// Version files go first: Update writes nothing when it fails, so a bad
+	// file stops the release before CHANGELOG.md (which reset --hard cannot
+	// remove while it is still untracked) is written.
+	versioned, err := versionfile.Update(root, cfg.VersionFiles, base)
+	if err != nil {
+		return rollback(err)
+	}
+
 	changelogPath := filepath.Join(root, "CHANGELOG.md")
 	existing, err := os.ReadFile(changelogPath)
 	if err != nil && !os.IsNotExist(err) {
@@ -151,12 +164,7 @@ func runRelease(opts releaseOptions) error {
 	// unrelated edits under .changes/ are not swept into the release commit. A
 	// failed move is fatal: a file left behind would double-count on the next
 	// release. Known issues stay until someone removes them.
-	staged := []string{"CHANGELOG.md"}
-	versioned, err := versionfile.Update(root, cfg.VersionFiles, base)
-	if err != nil {
-		return rollback(err)
-	}
-	staged = append(staged, versioned...)
+	staged := append([]string{"CHANGELOG.md"}, versioned...)
 	archiveRel := filepath.Join(changes.Dir, changes.ArchiveDir, base)
 	if err := os.MkdirAll(filepath.Join(root, archiveRel), 0755); err != nil {
 		return rollback(fmt.Errorf("creating %s: %w", archiveRel, err))

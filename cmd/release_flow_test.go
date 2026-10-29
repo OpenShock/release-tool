@@ -212,3 +212,38 @@ func TestRunPrerelease_RollsBackVersionCommitOnTagFailure(t *testing.T) {
 		t.Errorf("package.json not restored, version = %q", v)
 	}
 }
+
+// A bad version file must stop a stable release before CHANGELOG.md is
+// written: reset --hard cannot remove a CHANGELOG.md that is still untracked.
+func TestRunRelease_BadVersionFileLeavesNoChangelog(t *testing.T) {
+	root := versionFilesRepo(t)
+	mustWrite(t, filepath.Join(root, "frontend", "package.json"), `{"version": "0.0.0",}`)
+	gitCmd(t, root, "commit", "-am", "break package.json")
+	head := gitCmd(t, root, "rev-parse", "HEAD")
+	if err := runRelease(releaseOptions{output: filepath.Join(t.TempDir(), "release.json")}); err == nil {
+		t.Fatal("expected the release to fail on invalid JSON")
+	}
+	if cur := gitCmd(t, root, "rev-parse", "HEAD"); cur != head {
+		t.Errorf("HEAD moved")
+	}
+	if st := gitCmd(t, root, "status", "--porcelain"); st != "" {
+		t.Errorf("working tree should be untouched, got:\n%s", st)
+	}
+}
+
+// Untracked and ignored version files are rejected before anything is
+// written, since a rollback could not restore them.
+func TestRunPrerelease_RejectsUntrackedVersionFile(t *testing.T) {
+	root := versionFilesRepo(t)
+	gitCmd(t, root, "rm", "-q", "--cached", "frontend/package.json")
+	gitCmd(t, root, "commit", "-m", "untrack package.json")
+	if err := runPrerelease(releaseOptions{output: filepath.Join(t.TempDir(), "release.json"), prereleaseLabel: "rc"}); err == nil || !strings.Contains(err.Error(), "not tracked") {
+		t.Fatalf("expected a not-tracked error, got %v", err)
+	}
+	if v := readVersion(t, root); v != "0.0.0" {
+		t.Errorf("package.json was written: %q", v)
+	}
+	if tags := gitCmd(t, root, "tag"); tags != "" {
+		t.Errorf("no tag expected, got %q", tags)
+	}
+}

@@ -148,7 +148,7 @@ func runPrerelease(opts releaseOptions) error {
 			return nil
 		}
 		if !opts.gitSHA {
-			if err := validateVersionFiles(cfg); err != nil {
+			if err := validateVersionFiles(root, cfg); err != nil {
 				return err
 			}
 		}
