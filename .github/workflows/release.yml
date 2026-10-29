@@ -19,14 +19,25 @@ jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Releases are only cut from master, including manual dispatches.
-    if: github.actor != 'github-actions[bot]' && github.ref_name == 'master'
+    # Releases are only cut from master, including manual dispatches. The
+    # release commit is pushed by the App, so skip it by message, not actor.
+    if: >-
+      github.ref_name == 'master' &&
+      !startsWith(github.event.head_commit.message, 'chore: release ')
 
     steps:
+      # Tag creation is restricted by a ruleset that GITHUB_TOKEN cannot bypass,
+      # so push and publish with a short-lived token from the release GitHub App.
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app-token
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_KEY }}
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Configure git
         run: |
@@ -46,7 +57,7 @@ jobs:
           mode: release
           notes-output: release-notes.md
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
 
       - name: Push commit and tag
         uses: OpenShock/actions/publish-tag@21ca2d511bca92cf24fb502fa302f82700822584 # v1.1.1
@@ -68,7 +79,7 @@ jobs:
       - name: Create GitHub release
         if: steps.meta.outputs.tag != ''
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           TAG: ${{ steps.meta.outputs.tag }}
           PRERELEASE: ${{ steps.meta.outputs.prerelease }}
         run: |
