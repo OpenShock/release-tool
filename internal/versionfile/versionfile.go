@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 )
 
 // File is one entry of version_files in .changes/config.json.
@@ -142,8 +143,5 @@ func SetJSONString(data []byte, key, value string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make([]byte, 0, len(data)-(end-start)+len(encoded))
-	out = append(out, data[:start]...)
-	out = append(out, encoded...)
-	return append(out, data[end:]...), nil
+	return slices.Concat(data[:start], encoded, data[end:]), nil
 }
