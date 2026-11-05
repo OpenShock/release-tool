@@ -287,29 +287,62 @@ func Maintainers(root string) map[string]bool {
 	return set
 }
 
-// ChangeFileOrigin is the commit that added a change file.
+// ChangeFileOrigin is the commit that created a change file.
 type ChangeFileOrigin struct {
 	SHA     string
 	Time    int64 // committer time, unix seconds
 	Subject string
 }
 
-// ChangeFileAdded returns the most recent commit that added .changes/<filename>.
+// ChangeFileAdded returns the commit that created .changes/<filename>, following
+// renames: a commit that only moved or renamed it (tidying change files, say)
+// is skipped, so the PR that wrote the file is credited instead.
 // ok is false when the file has not been committed yet (or git fails).
 func ChangeFileAdded(root, filename string) (origin ChangeFileOrigin, ok bool) {
-	out, err := run(root, "log", "--diff-filter=A", "--format=%H%x1f%ct%x1f%s", "-n", "1", "--", ".changes/"+filename)
-	if err != nil || out == "" {
-		return ChangeFileOrigin{}, false
+	path := ".changes/" + filename
+	rev := "HEAD"
+	// Bounded so a pathological history can't loop; real change files move a handful of times at most.
+	for range 16 {
+		out, err := run(root, "log", "--diff-filter=A", "--format=%H%x1f%ct%x1f%s", "-n", "1", rev, "--", path)
+		if err != nil || out == "" {
+			return ChangeFileOrigin{}, false
+		}
+		parts := strings.SplitN(out, "\x1f", 3)
+		if len(parts) != 3 {
+			return ChangeFileOrigin{}, false
+		}
+		t, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil {
+			return ChangeFileOrigin{}, false
+		}
+		origin = ChangeFileOrigin{SHA: parts[0], Time: t, Subject: parts[2]}
+
+		// The path filter makes a rename look like an add; ask the whole commit whether it was one.
+		// Renames only, not copies: change files share boilerplate, and a copy match would credit an unrelated file.
+		from := renamedFrom(root, origin.SHA, path)
+		if from == "" {
+			return origin, true
+		}
+		path = from
+		rev = origin.SHA + "^"
 	}
-	parts := strings.SplitN(out, "\x1f", 3)
-	if len(parts) != 3 {
-		return ChangeFileOrigin{}, false
-	}
-	t, err := strconv.ParseInt(parts[1], 10, 64)
+	return origin, true
+}
+
+// renamedFrom returns the path that commit sha renamed to path, or "" when sha didn't rename it.
+func renamedFrom(root, sha, path string) string {
+	out, err := run(root, "diff-tree", "-r", "--root", "--no-commit-id", "-M", "--diff-filter=R", "--name-status", sha)
 	if err != nil {
-		return ChangeFileOrigin{}, false
+		return ""
 	}
-	return ChangeFileOrigin{SHA: parts[0], Time: t, Subject: parts[2]}, true
+	for line := range strings.SplitSeq(out, "\n") {
+		// "R<score>\t<from>\t<to>"
+		fields := strings.Split(line, "\t")
+		if len(fields) == 3 && fields[2] == path {
+			return fields[1]
+		}
+	}
+	return ""
 }
 
 var (
