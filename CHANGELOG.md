@@ -1,3 +1,22 @@
+## [v1.0.1] - 2026-10-29
+
+### Notices
+
+- **IMPORTANT**: **Notice levels are now caution, warning, important and note.** Change files using info or error fail to parse; rename info to note and error to caution.
+- **IMPORTANT**: **release.json is now schema version 2.** Consumers should read the new fields and the renamed notice levels.
+- **IMPORTANT**: **The PR check now fails without a change file.** Set require-changes to false to keep the old warning, or list paths that never need one under ignore_paths in .changes/config.json.
+- **IMPORTANT**: **A prerelease with version_files configured now pushes a commit.** Push HEAD together with the tag, as OpenShock/actions/publish-tag does, so the tag's commit lands on the branch.
+- **NOTE**: Unknown frontmatter keys are now errors, and files in .changes/ starting with "_" are reserved.
+
+### Added
+- Set the version in project files on release
+- Override the computed version of a stable release
+
+### Changed
+- **Breaking:** Put safety, breaking changes and upgrade requirements first in the release notes ([#15](https://github.com/OpenShock/release-tool/pull/15))
+
+**Full Changelog: [v0.6.0 -> v1.0.1](https://github.com/OpenShock/release-tool/compare/v0.6.0...v1.0.1)**
+
 ## [v0.6.0] - 2026-10-27
 
 ### Changed
