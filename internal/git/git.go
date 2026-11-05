@@ -301,9 +301,10 @@ type ChangeFileOrigin struct {
 func ChangeFileAdded(root, filename string) (origin ChangeFileOrigin, ok bool) {
 	path := ".changes/" + filename
 	rev := "HEAD"
-	// Bounded so a pathological history can't loop; real change files move a handful of times at most.
-	for range 16 {
-		out, err := run(root, "log", "--diff-filter=A", "--format=%H%x1f%ct%x1f%s", "-n", "1", rev, "--", path)
+	// Each hop moves rev to a strict ancestor, so the walk always ends.
+	for {
+		// Literal pathspecs: a name like "[ab].md" must not glob-match "a.md".
+		out, err := run(root, "--literal-pathspecs", "log", "--diff-filter=A", "--format=%H%x1f%ct%x1f%s", "-n", "1", rev, "--", path)
 		if err != nil || out == "" {
 			return ChangeFileOrigin{}, false
 		}
@@ -319,30 +320,33 @@ func ChangeFileAdded(root, filename string) (origin ChangeFileOrigin, ok bool) {
 
 		// The path filter makes a rename look like an add; ask the whole commit whether it was one.
 		// Renames only, not copies: change files share boilerplate, and a copy match would credit an unrelated file.
-		from := renamedFrom(root, origin.SHA, path)
+		from, err := renamedFrom(root, origin.SHA, path)
+		if err != nil {
+			return ChangeFileOrigin{}, false
+		}
 		if from == "" {
 			return origin, true
 		}
 		path = from
 		rev = origin.SHA + "^"
 	}
-	return origin, true
 }
 
 // renamedFrom returns the path that commit sha renamed to path, or "" when sha didn't rename it.
-func renamedFrom(root, sha, path string) string {
-	out, err := run(root, "diff-tree", "-r", "--root", "--no-commit-id", "-M", "--diff-filter=R", "--name-status", sha)
+func renamedFrom(root, sha, path string) (string, error) {
+	// -z keeps paths raw; without it git quotes names with unusual bytes.
+	out, err := run(root, "diff-tree", "-r", "-z", "--root", "--no-commit-id", "-M", "--diff-filter=R", "--name-status", sha)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	for line := range strings.SplitSeq(out, "\n") {
-		// "R<score>\t<from>\t<to>"
-		fields := strings.Split(line, "\t")
-		if len(fields) == 3 && fields[2] == path {
-			return fields[1]
+	// Records are "R<score>\0<from>\0<to>\0".
+	fields := strings.Split(strings.TrimRight(out, "\x00"), "\x00")
+	for i := 0; i+2 < len(fields); i += 3 {
+		if fields[i+2] == path {
+			return fields[i+1], nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
 var (
