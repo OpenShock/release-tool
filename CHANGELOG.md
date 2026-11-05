@@ -1,3 +1,16 @@
+## [v1.1.0] - 2026-11-05
+
+### Added
+- Record a given release time via SOURCE_DATE_EPOCH
+
+### Changed
+- Credit the pull request that created a change file, not the one that last moved it ([#17](https://github.com/OpenShock/release-tool/pull/17))
+
+### Fixed
+- Count change files that a merge commit adds ([#17](https://github.com/OpenShock/release-tool/pull/17))
+
+**Full Changelog: [v1.0.1 -> v1.1.0](https://github.com/OpenShock/release-tool/compare/v1.0.1...v1.1.0)**
+
 ## [v1.0.1] - 2026-10-29
 
 ### Notices
