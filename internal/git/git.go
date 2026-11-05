@@ -174,16 +174,19 @@ func IsAncestor(root, a, b string) bool {
 	return cmd.Run() == nil
 }
 
-// ChangedChangeFilesSinceRef returns basenames of .changes/*.md files added
-// since ref (exclusive) up to HEAD. When ref is empty, the full history is
-// searched. Only files directly in .changes/ count (not the release archive),
-// and README.md and reserved "_" files are excluded.
+// ChangedChangeFilesSinceRef returns basenames of .changes/*.md files present
+// at HEAD but not at the merge base of ref and HEAD. When ref is empty, every
+// change file at HEAD counts. Only files directly in .changes/ count (not the
+// release archive), and README.md and reserved "_" files are excluded.
+//
+// It compares trees rather than walking commits, so a file a merge commit
+// brings in counts, and one added and later removed does not.
 func ChangedChangeFilesSinceRef(root, ref string) ([]string, error) {
 	var args []string
 	if ref != "" {
-		args = []string{"log", ref + "..HEAD", "--diff-filter=A", "--name-only", "--format=", "--", ".changes/"}
+		args = []string{"diff", "--no-renames", "--diff-filter=A", "--name-only", ref + "...HEAD", "--", ".changes/"}
 	} else {
-		args = []string{"log", "--diff-filter=A", "--name-only", "--format=", "--", ".changes/"}
+		args = []string{"ls-tree", "-r", "--name-only", "HEAD", "--", ".changes/"}
 	}
 	out, err := run(root, args...)
 	if err != nil {
@@ -284,29 +287,66 @@ func Maintainers(root string) map[string]bool {
 	return set
 }
 
-// ChangeFileOrigin is the commit that added a change file.
+// ChangeFileOrigin is the commit that created a change file.
 type ChangeFileOrigin struct {
 	SHA     string
 	Time    int64 // committer time, unix seconds
 	Subject string
 }
 
-// ChangeFileAdded returns the most recent commit that added .changes/<filename>.
+// ChangeFileAdded returns the commit that created .changes/<filename>, following
+// renames: a commit that only moved or renamed it (tidying change files, say)
+// is skipped, so the PR that wrote the file is credited instead.
 // ok is false when the file has not been committed yet (or git fails).
 func ChangeFileAdded(root, filename string) (origin ChangeFileOrigin, ok bool) {
-	out, err := run(root, "log", "--diff-filter=A", "--format=%H%x1f%ct%x1f%s", "-n", "1", "--", ".changes/"+filename)
-	if err != nil || out == "" {
-		return ChangeFileOrigin{}, false
+	path := ".changes/" + filename
+	rev := "HEAD"
+	// Each hop moves rev to a strict ancestor, so the walk always ends.
+	for {
+		// Literal pathspecs: a name like "[ab].md" must not glob-match "a.md".
+		out, err := run(root, "--literal-pathspecs", "log", "--diff-filter=A", "--format=%H%x1f%ct%x1f%s", "-n", "1", rev, "--", path)
+		if err != nil || out == "" {
+			return ChangeFileOrigin{}, false
+		}
+		parts := strings.SplitN(out, "\x1f", 3)
+		if len(parts) != 3 {
+			return ChangeFileOrigin{}, false
+		}
+		t, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil {
+			return ChangeFileOrigin{}, false
+		}
+		origin = ChangeFileOrigin{SHA: parts[0], Time: t, Subject: parts[2]}
+
+		// The path filter makes a rename look like an add; ask the whole commit whether it was one.
+		// Renames only, not copies: change files share boilerplate, and a copy match would credit an unrelated file.
+		from, err := renamedFrom(root, origin.SHA, path)
+		if err != nil {
+			return ChangeFileOrigin{}, false
+		}
+		if from == "" {
+			return origin, true
+		}
+		path = from
+		rev = origin.SHA + "^"
 	}
-	parts := strings.SplitN(out, "\x1f", 3)
-	if len(parts) != 3 {
-		return ChangeFileOrigin{}, false
-	}
-	t, err := strconv.ParseInt(parts[1], 10, 64)
+}
+
+// renamedFrom returns the path that commit sha renamed to path, or "" when sha didn't rename it.
+func renamedFrom(root, sha, path string) (string, error) {
+	// -z keeps paths raw; without it git quotes names with unusual bytes.
+	out, err := run(root, "diff-tree", "-r", "-z", "--root", "--no-commit-id", "-M", "--diff-filter=R", "--name-status", sha)
 	if err != nil {
-		return ChangeFileOrigin{}, false
+		return "", err
 	}
-	return ChangeFileOrigin{SHA: parts[0], Time: t, Subject: parts[2]}, true
+	// Records are "R<score>\0<from>\0<to>\0".
+	fields := strings.Split(strings.TrimRight(out, "\x00"), "\x00")
+	for i := 0; i+2 < len(fields); i += 3 {
+		if fields[i+2] == path {
+			return fields[i+1], nil
+		}
+	}
+	return "", nil
 }
 
 var (

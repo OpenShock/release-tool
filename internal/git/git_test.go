@@ -245,3 +245,114 @@ func TestChangeFileAdded(t *testing.T) {
 		t.Error("uncommitted change file should report ok=false")
 	}
 }
+
+func TestChangeFileAdded_FollowsRenames(t *testing.T) {
+	root := newRepo(t)
+	if err := os.MkdirAll(filepath.Join(root, ".changes"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	body := "---\nkind: added\n---\nA feature with a title long enough to stay similar\n\n## Release Note\nSomething users notice\n"
+	if err := os.WriteFile(filepath.Join(root, ".changes", "old.md"), []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Add(root, ".changes/old.md"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Commit(root, "feat: write the change file (#12)"); err != nil {
+		t.Fatal(err)
+	}
+
+	// A later commit renames it and touches the text, as a tidy-up does.
+	if _, err := run(root, "mv", ".changes/old.md", ".changes/new.md"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".changes", "new.md"), []byte(body+"More detail\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Add(root, ".changes/new.md"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Commit(root, "chore: tidy the change files (#20)"); err != nil {
+		t.Fatal(err)
+	}
+
+	origin, ok := ChangeFileAdded(root, "new.md")
+	if !ok {
+		t.Fatal("expected the renamed change file to be found")
+	}
+	if origin.Subject != "feat: write the change file (#12)" {
+		t.Errorf("expected the commit that created the file, got %q", origin.Subject)
+	}
+}
+
+func TestChangedChangeFilesSinceRef_SkipsRemovedFiles(t *testing.T) {
+	root := newRepo(t)
+	commitFile(t, root, "seed.txt", "seed")
+	base, err := CurrentCommit(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(root, ".changes"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	commitFile(t, root, filepath.Join(".changes", "kept.md"), "---\nkind: fixed\n---\nKept\n")
+	commitFile(t, root, filepath.Join(".changes", "gone.md"), "---\nkind: fixed\n---\nGone\n")
+	if err := os.Remove(filepath.Join(root, ".changes", "gone.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := Add(root, filepath.Join(".changes", "gone.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := Commit(root, "remove gone.md"); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := ChangedChangeFilesSinceRef(root, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0] != "kept.md" {
+		t.Errorf("only change files still present at HEAD count, got %v", files)
+	}
+}
+
+func TestChangeFileAdded_LiteralPathspec(t *testing.T) {
+	root := newRepo(t)
+	if err := os.MkdirAll(filepath.Join(root, ".changes"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	commitFile(t, root, ".changes/[ab].md", "glob-like name")
+	commitFile(t, root, ".changes/a.md", "unrelated")
+
+	origin, ok := ChangeFileAdded(root, "[ab].md")
+	if !ok {
+		t.Fatal("expected the change file to be found")
+	}
+	if origin.Subject != "add .changes/[ab].md" {
+		t.Errorf("glob characters matched another file: got %q", origin.Subject)
+	}
+}
+
+func TestChangeFileAdded_FollowsRenameFromQuotedPath(t *testing.T) {
+	root := newRepo(t)
+	if err := os.MkdirAll(filepath.Join(root, ".changes"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	body := "---\nkind: added\n---\nA feature with a title long enough to stay similar\n"
+	commitFile(t, root, ".changes/blåbær.md", body)
+	if _, err := run(root, "mv", ".changes/blåbær.md", ".changes/plain.md"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Commit(root, "chore: rename"); err != nil {
+		t.Fatal(err)
+	}
+
+	origin, ok := ChangeFileAdded(root, "plain.md")
+	if !ok {
+		t.Fatal("expected the renamed change file to be found")
+	}
+	if origin.Subject != "add .changes/blåbær.md" {
+		t.Errorf("expected the commit that created the file, got %q", origin.Subject)
+	}
+}
