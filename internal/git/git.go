@@ -174,16 +174,19 @@ func IsAncestor(root, a, b string) bool {
 	return cmd.Run() == nil
 }
 
-// ChangedChangeFilesSinceRef returns basenames of .changes/*.md files added
-// since ref (exclusive) up to HEAD. When ref is empty, the full history is
-// searched. Only files directly in .changes/ count (not the release archive),
-// and README.md and reserved "_" files are excluded.
+// ChangedChangeFilesSinceRef returns basenames of .changes/*.md files present
+// at HEAD but not at the merge base of ref and HEAD. When ref is empty, every
+// change file at HEAD counts. Only files directly in .changes/ count (not the
+// release archive), and README.md and reserved "_" files are excluded.
+//
+// It compares trees rather than walking commits, so a file a merge commit
+// brings in counts, and one added and later removed does not.
 func ChangedChangeFilesSinceRef(root, ref string) ([]string, error) {
 	var args []string
 	if ref != "" {
-		args = []string{"log", ref + "..HEAD", "--diff-filter=A", "--name-only", "--format=", "--", ".changes/"}
+		args = []string{"diff", "--no-renames", "--diff-filter=A", "--name-only", ref + "...HEAD", "--", ".changes/"}
 	} else {
-		args = []string{"log", "--diff-filter=A", "--name-only", "--format=", "--", ".changes/"}
+		args = []string{"ls-tree", "-r", "--name-only", "HEAD", "--", ".changes/"}
 	}
 	out, err := run(root, args...)
 	if err != nil {

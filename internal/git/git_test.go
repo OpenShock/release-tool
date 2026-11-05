@@ -245,3 +245,35 @@ func TestChangeFileAdded(t *testing.T) {
 		t.Error("uncommitted change file should report ok=false")
 	}
 }
+
+func TestChangedChangeFilesSinceRef_SkipsRemovedFiles(t *testing.T) {
+	root := newRepo(t)
+	commitFile(t, root, "seed.txt", "seed")
+	base, err := CurrentCommit(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(root, ".changes"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	commitFile(t, root, filepath.Join(".changes", "kept.md"), "---\nkind: fixed\n---\nKept\n")
+	commitFile(t, root, filepath.Join(".changes", "gone.md"), "---\nkind: fixed\n---\nGone\n")
+	if err := os.Remove(filepath.Join(root, ".changes", "gone.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := Add(root, filepath.Join(".changes", "gone.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := Commit(root, "remove gone.md"); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := ChangedChangeFilesSinceRef(root, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0] != "kept.md" {
+		t.Errorf("only change files still present at HEAD count, got %v", files)
+	}
+}

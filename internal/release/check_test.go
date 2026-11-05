@@ -208,3 +208,30 @@ func TestRunCheck_StaleBaseIgnoresBaseAccruedFiles(t *testing.T) {
 		t.Errorf("expected Missing (PR adds no change file), got %q; body:\n%s", v.State, v.Body)
 	}
 }
+
+func TestRunCheck_ChangeFileAddedInMergeCommit(t *testing.T) {
+	root := makeRepo(t, nil)
+	gitInit(t, root)
+	base := gitExec(t, root, "rev-parse", "HEAD")
+
+	// The PR branch only gets its change file while merging the base back in, the way a conflict resolution can.
+	gitExec(t, root, "checkout", "-q", "-b", "pr")
+	gitExec(t, root, "commit", "--allow-empty", "-m", "pr work")
+	gitExec(t, root, "checkout", "-q", "master")
+	gitExec(t, root, "commit", "--allow-empty", "-m", "base work")
+	gitExec(t, root, "checkout", "-q", "pr")
+	gitExec(t, root, "merge", "--no-ff", "--no-commit", "master")
+	if err := os.WriteFile(filepath.Join(root, ".changes", "merged.md"), []byte("---\nkind: added\n---\nMerged feature\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	gitExec(t, root, "add", filepath.Join(".changes", "merged.md"))
+	gitExec(t, root, "commit", "--no-edit")
+
+	v, err := RunCheck(CheckParams{Root: root, BaseBranch: "master", Against: base, Config: releaseBranchConfig})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if v.State != StateOK {
+		t.Errorf("expected ok for a change file added in a merge commit, got %q; body:\n%s", v.State, v.Body)
+	}
+}
